@@ -12,6 +12,13 @@ from databox.infrastructure.rows import Base
 
 
 def database_url() -> str:
+    external = os.environ.get("DATABASE_URL", "").strip()
+    if external:
+        if external.startswith("postgres://"):
+            external = "postgresql://" + external[len("postgres://") :]
+        if external.startswith("postgresql://"):
+            external = "postgresql+asyncpg://" + external[len("postgresql://") :]
+        return external
     user = os.environ.get("POSTGRES_USER", "databox")
     password = quote_plus(os.environ.get("POSTGRES_PASSWORD", "databox_local_password"))
     host = os.environ.get("POSTGRES_HOST", "127.0.0.1")
@@ -21,10 +28,19 @@ def database_url() -> str:
 
 
 def sync_database_url() -> str:
-    return database_url().replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
+    url = database_url().replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
+    if os.environ.get("DATABASE_URL", "").strip() and "sslmode=" not in url:
+        url += ("&" if "?" in url else "?") + "sslmode=require"
+    return url
 
 
-engine = create_async_engine(database_url(), pool_pre_ping=True)
+def _engine_connect_args() -> dict:
+    if not os.environ.get("DATABASE_URL", "").strip():
+        return {}
+    return {"ssl": True}
+
+
+engine = create_async_engine(database_url(), pool_pre_ping=True, connect_args=_engine_connect_args())
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 

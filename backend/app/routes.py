@@ -16,6 +16,11 @@ from databox.domain.exceptions import ConflictError, DomainError, NotFoundError,
 router = APIRouter(prefix="/api/v1", tags=["databox"])
 
 
+@router.get("/health")
+async def health() -> dict:
+    return {"status": "ok"}
+
+
 class ShareRequest(BaseModel):
     permission: str = "viewer"
     expires_at: datetime

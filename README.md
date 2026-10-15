@@ -244,6 +244,16 @@ docker compose --env-file .env.production -f docker-compose.prod.yml logs -f api
 
 Stop it with `docker compose --env-file .env.production -f docker-compose.prod.yml down`. Adding `-v` deletes the database, the document files, and the certificate. Do not add `-v` unless you mean to erase them.
 
+## Host it on Render
+
+Render has a free web service, a free Postgres database, and a free Redis-compatible store. Pick **Free** for each one. Do not add a credit card if you want to avoid charges. Render can bill a workspace that has a card when bandwidth or build minutes go past the included amount.
+
+The free database expires 30 days after it is created. Render deletes it after a further 14 days unless you upgrade it to a paid plan. The free website sleeps after 15 minutes of no visitors, and the next visit takes about a minute to wake. A free website cannot keep a disk, so rendered pictures can disappear when the service restarts. The collaborative text stays in Postgres until that free database expires.
+
+Push this repository to GitHub, then in the Render dashboard choose **New** and **Blueprint**. Connect the repository and select `render.yaml`. When Render asks for a plan, choose **Free** for the website, the database, and the key-value store. Do not attach a persistent disk.
+
+After the deploy finishes, open the service URL and choose **Create an organization**.
+
 ## Production
 
 Set `APP_ENV=production` only with all of these:

@@ -1,0 +1,47 @@
+databases:
+  - name: databox-db
+    plan: free
+    databaseName: databox
+    user: databox
+
+services:
+  - type: keyvalue
+    name: databox-redis
+    plan: free
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+
+  - type: web
+    name: databox
+    runtime: docker
+    dockerfilePath: ./Dockerfile.render
+    plan: free
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: databox-db
+          property: connectionString
+      - key: DATABOX_REDIS_URL
+        fromService:
+          name: databox-redis
+          type: keyvalue
+          property: connectionString
+      - key: DATABOX_STORAGE
+        value: volume
+      - key: DATABOX_LOCAL_DIR
+        value: /var/lib/databox/objects
+      - key: DATABOX_RENDER_QUEUE
+        value: http
+      - key: DATABOX_RENDER_URL
+        value: http://127.0.0.1:8091/internal/tasks/render
+      - key: DATABOX_AUTH_SECRET
+        generateValue: true
+      - key: DATABOX_TOKEN_PEPPER
+        generateValue: true
+      - key: DATABOX_VIEW_TOKEN_SECRET
+        generateValue: true
+      - key: DATABOX_TASK_SECRET
+        generateValue: true
