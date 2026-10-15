@@ -29,6 +29,7 @@ class MemoryDataboxStore:
         self.versions: dict[UUID, DocumentVersion] = {}
         self.shares: dict[UUID, ShareLink] = {}
         self.permissions: list[DocumentPermission] = []
+        self.members: dict[tuple[UUID, UUID], str] = {}
         self.attributes: dict[tuple[UUID, UUID], MembershipAttributes] = {}
         self.links: dict[UUID, DocumentLink] = {}
         self.uploads: dict[UUID, UploadOperation] = {}
@@ -152,6 +153,9 @@ class MemoryDataboxStore:
     async def save_attributes(self, attributes: MembershipAttributes) -> None:
         self.attributes[(attributes.organization_id, attributes.user_id)] = attributes
 
+    async def get_member_role(self, organization_id: UUID, user_id: UUID) -> str | None:
+        return self.members.get((organization_id, user_id))
+
     async def get_permission(self, organization_id: UUID, document_id: UUID, user_id: UUID) -> str | None:
         for row in self.permissions:
             if (
@@ -169,6 +173,24 @@ class MemoryDataboxStore:
             if not (row.document_id == permission.document_id and row.user_id == permission.user_id)
         ]
         self.permissions.append(permission)
+
+    async def list_permissions(self, organization_id: UUID, document_id: UUID) -> list[DocumentPermission]:
+        return [
+            row
+            for row in self.permissions
+            if row.organization_id == organization_id and row.document_id == document_id
+        ]
+
+    async def delete_permission(self, organization_id: UUID, document_id: UUID, user_id: UUID) -> bool:
+        kept: list[DocumentPermission] = []
+        removed = False
+        for row in self.permissions:
+            if row.organization_id == organization_id and row.document_id == document_id and row.user_id == user_id:
+                removed = True
+                continue
+            kept.append(row)
+        self.permissions = kept
+        return removed
 
     async def list_links(self, organization_id: UUID, source_document_id: UUID) -> list[DocumentLink]:
         return [

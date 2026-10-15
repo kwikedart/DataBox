@@ -80,6 +80,11 @@ export function WorkspacePage({ session, onSignOut }: { session: Session; onSign
       <p className="hint">
         Signed in as {session.email} ({session.role})
       </p>
+      <label>
+        Your user id
+        <input readOnly value={session.userId} aria-label="Your user id" />
+      </label>
+      <p className="hint">Give this id to an owner when a document should stay open for you.</p>
       {error ? <p className="error">{error}</p> : null}
       <form onSubmit={(event) => void createDocument(event)}>
         <label>

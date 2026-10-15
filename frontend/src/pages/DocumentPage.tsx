@@ -52,6 +52,9 @@ export function DocumentPage({ session }: { session: Session }) {
   const [linkHours, setLinkHours] = useState("24");
   const [audience, setAudience] = useState("");
   const [restricted, setRestricted] = useState("");
+  const [personId, setPersonId] = useState("");
+  const [personRole, setPersonRole] = useState("viewer");
+  const [people, setPeople] = useState<{ userId: string; role: string }[]>([]);
   const [editor, setEditor] = useState<ReturnType<typeof connectCollaboration> | null>(null);
   const canManage = session.role === "owner" || session.role === "admin";
 
@@ -83,6 +86,13 @@ export function DocumentPage({ session }: { session: Session }) {
       })
       .catch(() => {
         if (!cancelled) setLinks([]);
+      });
+    api<{ shares: { userId: string; role: string }[] }>(`/api/v1/documents/${documentId}/permissions`, session)
+      .then((payload) => {
+        if (!cancelled) setPeople(payload.shares);
+      })
+      .catch(() => {
+        if (!cancelled) setPeople([]);
       });
     return () => {
       cancelled = true;
@@ -225,6 +235,41 @@ export function DocumentPage({ session }: { session: Session }) {
     }
   }
 
+  async function reloadPeople() {
+    const payload = await api<{ shares: { userId: string; role: string }[] }>(
+      `/api/v1/documents/${documentId}/permissions`,
+      session,
+    );
+    setPeople(payload.shares);
+  }
+
+  async function shareWithUser() {
+    const userId = personId.trim();
+    if (!userId) return;
+    setError("");
+    try {
+      await api(`/api/v1/documents/${documentId}/permissions`, session, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, role: personRole }),
+      });
+      setPersonId("");
+      await reloadPeople();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That user was not shared");
+    }
+  }
+
+  async function removePerson(userId: string) {
+    setError("");
+    try {
+      await api(`/api/v1/documents/${documentId}/permissions/${userId}`, session, { method: "DELETE" });
+      await reloadPeople();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That share was not removed");
+    }
+  }
+
   async function restore(versionId: string) {
     if (!documentRow?.currentVersionId) return;
     setError("");
@@ -341,6 +386,38 @@ export function DocumentPage({ session }: { session: Session }) {
         {pageUrl ? <img className="page" alt="Document page" src={pageUrl} /> : null}
         {!canManage ? null : (
           <>
+            <label>
+              Share with user id
+              <input
+                value={personId}
+                aria-label="Share with user id"
+                placeholder="User id"
+                onChange={(event) => setPersonId(event.target.value)}
+              />
+            </label>
+            <label>
+              Access for this user
+              <select aria-label="Access for this user" value={personRole} onChange={(event) => setPersonRole(event.target.value)}>
+                <option value="viewer">View</option>
+                <option value="editor">Edit</option>
+              </select>
+            </label>
+            <button type="button" className="secondary" onClick={() => void shareWithUser()} disabled={!personId.trim()}>
+              Share with this user
+            </button>
+            <p className="hint">
+              This share does not expire. The person signs in with that user id. A blocked label still keeps them out, and the access cannot exceed their organization role.
+            </p>
+            <ul>
+              {people.map((person) => (
+                <li key={person.userId}>
+                  {person.userId} ({person.role === "editor" ? "edit" : "view"})
+                  <button type="button" className="secondary" onClick={() => void removePerson(person.userId)}>
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
             <label>
               Always opened by
               <input

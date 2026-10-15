@@ -31,13 +31,12 @@ from databox.domain.policies import (
     assert_share_request,
     child_depth,
     epochs_match,
-    labels_permit,
+    id_grant_permits,
     narrow_actions,
     org_actions,
     orphan_keys,
     require_action,
     require_active_document,
-    require_labels,
     share_actions,
     share_is_usable,
 )
@@ -130,18 +129,38 @@ class DataboxApplication:
             return frozenset()
         return await self.store.get_attributes(organization_id, user_id)
 
-    async def _actions_for(self, actor: TenantIdentity, document: Document) -> frozenset[str]:
-        grant = await self.store.get_permission(document.organization_id, document.id, actor.user_id)
-        return narrow_actions(org_actions(actor.role), grant)
+    async def _opening(
+        self, organization_id: UUID, user_id: UUID | None, document: Document
+    ) -> tuple[bool, str | None, bool]:
+        caller_labels = await self._labels_for(organization_id, user_id)
+        direct = None
+        if user_id is not None:
+            direct = await self.store.get_permission(organization_id, document.id, user_id)
+        via_labels = id_grant_permits(
+            audience_labels=document.audience_labels,
+            restricted_labels=document.restricted_labels,
+            caller_labels=caller_labels,
+            direct_role=None,
+        )
+        allowed = via_labels or id_grant_permits(
+            audience_labels=document.audience_labels,
+            restricted_labels=document.restricted_labels,
+            caller_labels=caller_labels,
+            direct_role=direct,
+        )
+        return allowed, direct, via_labels
 
     async def _visible(self, actor: TenantIdentity, document_id: UUID, action: str) -> tuple[Document, frozenset[str]]:
         document = require_active_document(
             await self.store.get_document(actor.organization_id, document_id),
             organization_id=actor.organization_id,
         )
-        caller_labels = await self._labels_for(actor.organization_id, actor.user_id)
-        require_labels(document, caller_labels)
-        actions = await self._actions_for(actor, document)
+        allowed, direct, via_labels = await self._opening(actor.organization_id, actor.user_id, document)
+        if not allowed:
+            raise NotFoundError("Document not found")
+        actions = org_actions(actor.role)
+        if not via_labels:
+            actions = narrow_actions(actions, direct)
         require_action(actions, action)
         return document, actions
 
@@ -657,17 +676,15 @@ class DataboxApplication:
     async def list_documents(self, *, actor: TenantIdentity, case_id: UUID | None = None) -> list[Document]:
         rows = await self.store.list_documents(actor.organization_id, case_id)
         visible: list[Document] = []
-        caller_labels = await self._labels_for(actor.organization_id, actor.user_id)
         for document in rows:
             if document.status != "active":
                 continue
-            if not labels_permit(
-                audience_labels=document.audience_labels,
-                restricted_labels=document.restricted_labels,
-                caller_labels=caller_labels,
-            ):
+            allowed, direct, via_labels = await self._opening(actor.organization_id, actor.user_id, document)
+            if not allowed:
                 continue
-            actions = await self._actions_for(actor, document)
+            actions = org_actions(actor.role)
+            if not via_labels:
+                actions = narrow_actions(actions, direct)
             if "read" in actions:
                 visible.append(document)
         return visible
@@ -753,6 +770,10 @@ class DataboxApplication:
         self, *, actor: TenantIdentity, document_id: UUID, user_id: UUID, role: str
     ) -> DocumentPermission:
         document, _actions = await self._visible(actor, document_id, "manage_shares")
+        if user_id == actor.user_id:
+            raise ValidationError("Share with another person's user id")
+        if await self.store.get_member_role(actor.organization_id, user_id) is None:
+            raise ValidationError("That user is not in this organization")
         permission = DocumentPermission(
             id=uuid4(),
             organization_id=actor.organization_id,
@@ -764,9 +785,41 @@ class DataboxApplication:
         bumped = await self._bump_document(document)
         await self.store.save_permission(permission)
         await self.store.save_document(bumped)
+        await self._audit(
+            organization_id=actor.organization_id,
+            actor_user_id=actor.user_id,
+            document_id=document.id,
+            action="permission.grant",
+            resource_type="document_permission",
+            resource_id=permission.id,
+            outcome="success",
+        )
         await self.transaction.commit()
         await self._publish_epoch(_DOC_EPOCH.format(document.id), bumped.policy_epoch)
         return permission
+
+    async def list_user_shares(self, *, actor: TenantIdentity, document_id: UUID) -> list[DocumentPermission]:
+        document, _actions = await self._visible(actor, document_id, "manage_shares")
+        return await self.store.list_permissions(document.organization_id, document.id)
+
+    async def revoke_user_share(self, *, actor: TenantIdentity, document_id: UUID, user_id: UUID) -> None:
+        document, _actions = await self._visible(actor, document_id, "manage_shares")
+        removed = await self.store.delete_permission(actor.organization_id, document.id, user_id)
+        if not removed:
+            raise ValidationError("That user is not shared on this document")
+        bumped = await self._bump_document(document)
+        await self.store.save_document(bumped)
+        await self._audit(
+            organization_id=actor.organization_id,
+            actor_user_id=actor.user_id,
+            document_id=document.id,
+            action="permission.revoke",
+            resource_type="document_permission",
+            resource_id=user_id,
+            outcome="success",
+        )
+        await self.transaction.commit()
+        await self._publish_epoch(_DOC_EPOCH.format(document.id), bumped.policy_epoch)
 
     async def _bump_document(self, document: Document) -> Document:
         return Document(
@@ -1133,12 +1186,8 @@ class DataboxApplication:
             await self.store.get_document(link.organization_id, link.document_id),
             organization_id=link.organization_id,
         )
-        caller_labels = await self._labels_for(actor.organization_id, actor.user_id)
-        if not labels_permit(
-            audience_labels=document.audience_labels,
-            restricted_labels=document.restricted_labels,
-            caller_labels=caller_labels,
-        ):
+        allowed, _direct, _via_labels = await self._opening(actor.organization_id, actor.user_id, document)
+        if not allowed:
             await self._audit(
                 organization_id=link.organization_id,
                 actor_user_id=actor.user_id,
@@ -1187,10 +1236,9 @@ class DataboxApplication:
                 await self.store.get_document(link.organization_id, document_id),
                 organization_id=link.organization_id,
             )
-            caller_labels = frozenset()
-            if actor is not None and actor.organization_id == link.organization_id:
-                caller_labels = await self._labels_for(actor.organization_id, actor.user_id)
-            require_labels(document, caller_labels)
+            allowed, _direct, _via_labels = await self._opening(link.organization_id, actor.user_id, document)
+            if not allowed:
+                raise NotFoundError("Share link not found")
             version_id = link.version_id or document.current_version_id
             if version_id is None:
                 raise NotFoundError("Document not found")
@@ -1262,13 +1310,15 @@ class DataboxApplication:
             await self.store.get_document(parent.organization_id, target_document_id),
             organization_id=parent.organization_id,
         )
-        caller_labels: frozenset[str] = frozenset()
+        subject_id: UUID | None = None
         if parent.subject and parent.subject != "share":
             try:
-                caller_labels = await self._labels_for(parent.organization_id, UUID(parent.subject))
+                subject_id = UUID(parent.subject)
             except ValueError:
-                caller_labels = frozenset()
-        require_labels(document, caller_labels)
+                subject_id = None
+        allowed, _direct, _via_labels = await self._opening(parent.organization_id, subject_id, document)
+        if not allowed:
+            raise NotFoundError("Document not found")
         if document.current_version_id is None:
             raise NotFoundError("Document not found")
         issued_at, lifetime_end = self._view_lifetime(now)
@@ -1347,8 +1397,9 @@ class DataboxApplication:
             await self.store.get_document(actor.organization_id, target_document_id),
             organization_id=actor.organization_id,
         )
-        caller_labels = await self._labels_for(actor.organization_id, actor.user_id)
-        require_labels(target, caller_labels)
+        allowed, _direct, _via_labels = await self._opening(actor.organization_id, actor.user_id, target)
+        if not allowed:
+            raise NotFoundError("Document not found")
         link = DocumentLink(
             id=uuid4(),
             organization_id=actor.organization_id,
@@ -1366,17 +1417,13 @@ class DataboxApplication:
     async def list_links(self, *, actor: TenantIdentity, document_id: UUID) -> list[DocumentLink]:
         await self._visible(actor, document_id, "read")
         rows = await self.store.list_links(actor.organization_id, document_id)
-        caller_labels = await self._labels_for(actor.organization_id, actor.user_id)
         visible: list[DocumentLink] = []
         for link in rows:
             target = await self.store.get_document(actor.organization_id, link.target_document_id)
             if target is None or target.status != "active":
                 continue
-            if labels_permit(
-                audience_labels=target.audience_labels,
-                restricted_labels=target.restricted_labels,
-                caller_labels=caller_labels,
-            ):
+            allowed, _direct, _via_labels = await self._opening(actor.organization_id, actor.user_id, target)
+            if allowed:
                 visible.append(link)
         return visible
 

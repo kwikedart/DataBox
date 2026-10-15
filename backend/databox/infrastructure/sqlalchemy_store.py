@@ -16,6 +16,7 @@ from databox.infrastructure.rows import (
     DataboxDocumentVersionRow,
     DataboxMembershipAttributeRow,
     DataboxShareLinkRow,
+    MembershipRow,
     DataboxUploadOperationRow,
     DataboxYjsUpdateRow,
 )
@@ -343,6 +344,15 @@ class SqlAlchemyDataboxStore:
             row.labels = list(attributes.labels)
         await self.session.flush()
 
+    async def get_member_role(self, organization_id: UUID, user_id: UUID) -> str | None:
+        row = await self.session.scalar(
+            select(MembershipRow).where(
+                MembershipRow.organization_id == organization_id,
+                MembershipRow.user_id == user_id,
+            )
+        )
+        return None if row is None else row.role
+
     async def get_permission(self, organization_id: UUID, document_id: UUID, user_id: UUID) -> str | None:
         row = await self.session.scalar(
             select(DataboxDocumentPermissionRow).where(
@@ -377,6 +387,41 @@ class SqlAlchemyDataboxStore:
             row.role = permission.role
             row.granted_by = permission.granted_by
         await self.session.flush()
+
+    async def list_permissions(self, organization_id: UUID, document_id: UUID) -> list[DocumentPermission]:
+        rows = (
+            await self.session.scalars(
+                select(DataboxDocumentPermissionRow).where(
+                    DataboxDocumentPermissionRow.organization_id == organization_id,
+                    DataboxDocumentPermissionRow.document_id == document_id,
+                )
+            )
+        ).all()
+        return [
+            DocumentPermission(
+                id=row.id,
+                organization_id=row.organization_id,
+                document_id=row.document_id,
+                user_id=row.user_id,
+                role=row.role,
+                granted_by=row.granted_by,
+            )
+            for row in rows
+        ]
+
+    async def delete_permission(self, organization_id: UUID, document_id: UUID, user_id: UUID) -> bool:
+        row = await self.session.scalar(
+            select(DataboxDocumentPermissionRow).where(
+                DataboxDocumentPermissionRow.organization_id == organization_id,
+                DataboxDocumentPermissionRow.document_id == document_id,
+                DataboxDocumentPermissionRow.user_id == user_id,
+            )
+        )
+        if row is None:
+            return False
+        await self.session.delete(row)
+        await self.session.flush()
+        return True
 
     async def list_links(self, organization_id: UUID, source_document_id: UUID) -> list[DocumentLink]:
         rows = (

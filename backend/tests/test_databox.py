@@ -387,11 +387,12 @@ async def test_cascade_does_not_grant_unlinked_or_deeper_documents() -> None:
 
 @pytest.mark.asyncio
 async def test_document_grant_cannot_widen_a_viewer() -> None:
-    application, _store, _storage = build()
+    application, store, _storage = build()
     organization_id = uuid4()
     owner = actor("owner", organization_id=organization_id)
     viewer = actor("viewer", organization_id=organization_id)
     document = await application.create_document(actor=owner, title="Labs", content=PDF)
+    store.members[(organization_id, viewer.user_id)] = "viewer"
     await application.grant_permission(
         actor=owner,
         document_id=document.id,
@@ -405,6 +406,92 @@ async def test_document_grant_cannot_widen_a_viewer() -> None:
             content=PDF,
             expected_version_id=document.current_version_id,
         )
+
+
+@pytest.mark.asyncio
+async def test_user_id_share_opens_a_labeled_document_until_it_is_removed() -> None:
+    application, store, _storage = build(settings(share_resolve_limit=20))
+    organization_id = uuid4()
+    owner = actor("owner", organization_id=organization_id)
+    customer = actor("member", organization_id=organization_id)
+    other = actor("member", organization_id=organization_id)
+    outsider = actor("member")
+    store.members[(organization_id, customer.user_id)] = "member"
+    store.members[(organization_id, other.user_id)] = "member"
+    store.members[(organization_id, owner.user_id)] = "owner"
+    await application.set_membership_labels(actor=owner, user_id=owner.user_id, labels=("finance",))
+    document = await application.create_text_document(actor=owner, title="Named notes")
+    await application.set_labels(
+        actor=owner,
+        document_id=document.id,
+        audience_labels=("finance",),
+        restricted_labels=(),
+    )
+    with pytest.raises(NotFoundError):
+        await application.get_document(actor=customer, document_id=document.id)
+    with pytest.raises(ValidationError):
+        await application.grant_permission(
+            actor=owner,
+            document_id=document.id,
+            user_id=outsider.user_id,
+            role="viewer",
+        )
+    with pytest.raises(ValidationError):
+        await application.grant_permission(
+            actor=owner,
+            document_id=document.id,
+            user_id=owner.user_id,
+            role="viewer",
+        )
+    granted = await application.grant_permission(
+        actor=owner,
+        document_id=document.id,
+        user_id=customer.user_id,
+        role="editor",
+    )
+    assert granted.role == "editor"
+    assert (await application.get_document(actor=customer, document_id=document.id)).id == document.id
+    with pytest.raises(NotFoundError):
+        await application.get_document(actor=other, document_id=document.id)
+    assert [row.id for row in await application.list_documents(actor=customer)] == [document.id]
+    assert await application.list_documents(actor=other) == []
+    shares = await application.list_user_shares(actor=owner, document_id=document.id)
+    assert [(row.user_id, row.role) for row in shares] == [(customer.user_id, "editor")]
+    with pytest.raises(NotFoundError):
+        await application.list_user_shares(actor=customer, document_id=document.id)
+    link = await application.create_share_link(
+        actor=owner,
+        document_id=document.id,
+        permission="viewer",
+        expires_at=NOW + timedelta(hours=1),
+    )
+    opened = await application.resolve_share(actor=customer, token=link.url_token, caller_key="customer")
+    assert opened.document_id == document.id
+    with pytest.raises(NotFoundError):
+        await application.resolve_share(actor=other, token=link.url_token, caller_key="other")
+    await application.set_membership_labels(actor=owner, user_id=customer.user_id, labels=("contractor",))
+    await application.set_labels(
+        actor=owner,
+        document_id=document.id,
+        audience_labels=("finance",),
+        restricted_labels=("contractor",),
+    )
+    with pytest.raises(NotFoundError):
+        await application.get_document(actor=customer, document_id=document.id)
+    with pytest.raises(NotFoundError):
+        await application.resolve_share(actor=customer, token=link.url_token, caller_key="blocked")
+    await application.set_membership_labels(actor=owner, user_id=customer.user_id, labels=())
+    await application.set_labels(
+        actor=owner,
+        document_id=document.id,
+        audience_labels=("finance",),
+        restricted_labels=(),
+    )
+    await application.revoke_user_share(actor=owner, document_id=document.id, user_id=customer.user_id)
+    with pytest.raises(NotFoundError):
+        await application.get_document(actor=customer, document_id=document.id)
+    with pytest.raises(NotFoundError):
+        await application.resolve_share(actor=customer, token=link.url_token, caller_key="revoked")
 
 
 @pytest.mark.asyncio

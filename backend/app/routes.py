@@ -537,6 +537,35 @@ async def grant_permission(
     return {"documentId": str(permission.document_id), "userId": str(permission.user_id), "role": permission.role}
 
 
+@router.get("/documents/{document_id}/permissions")
+async def list_user_shares(
+    document_id: UUID,
+    actor=Depends(get_actor),
+    application: DataboxApplication = Depends(get_databox_application),
+):
+    try:
+        shares = await application.list_user_shares(actor=actor, document_id=document_id)
+    except DomainError as exc:
+        raise _http(exc) from exc
+    return {
+        "shares": [{"userId": str(share.user_id), "role": share.role} for share in shares],
+    }
+
+
+@router.delete("/documents/{document_id}/permissions/{user_id}", status_code=204)
+async def revoke_user_share(
+    document_id: UUID,
+    user_id: UUID,
+    actor=Depends(get_actor),
+    application: DataboxApplication = Depends(get_databox_application),
+):
+    try:
+        await application.revoke_user_share(actor=actor, document_id=document_id, user_id=user_id)
+    except DomainError as exc:
+        raise _http(exc) from exc
+    return Response(status_code=204)
+
+
 @router.post("/documents/{document_id}/links", status_code=201)
 async def create_link(
     document_id: UUID,

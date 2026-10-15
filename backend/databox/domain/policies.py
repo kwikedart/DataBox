@@ -75,6 +75,27 @@ def require_action(actions: frozenset[str], action: str) -> None:
         raise NotFoundError(_HIDDEN)
 
 
+def id_grant_permits(
+    *,
+    audience_labels: tuple[str, ...],
+    restricted_labels: tuple[str, ...],
+    caller_labels: frozenset[str],
+    direct_role: str | None,
+) -> bool:
+    """A blocked label always denies. A named user id can open when audience labels would not."""
+    caller = {label.strip().lower() for label in caller_labels}
+    restricted = {label.strip().lower() for label in restricted_labels}
+    if caller & restricted:
+        return False
+    if labels_permit(
+        audience_labels=audience_labels,
+        restricted_labels=restricted_labels,
+        caller_labels=caller_labels,
+    ):
+        return True
+    return direct_role in {"viewer", "editor"}
+
+
 def require_labels(document: Document, caller_labels: frozenset[str]) -> None:
     if not labels_permit(
         audience_labels=document.audience_labels,
