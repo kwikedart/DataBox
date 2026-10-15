@@ -61,19 +61,6 @@ export function WorkspacePage({ session, onSignOut }: { session: Session; onSign
     }
   }
 
-  async function upload(file: File) {
-    setError("");
-    const body = new FormData();
-    body.append("file", file);
-    body.append("title", file.name.replace(/\.pdf$/i, ""));
-    try {
-      await api<DocumentRow>("/api/v1/documents", session, { method: "POST", body });
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
-    }
-  }
-
   return (
     <main>
       <h1>DataBox</h1>
@@ -96,18 +83,6 @@ export function WorkspacePage({ session, onSignOut }: { session: Session; onSign
         </button>
       </form>
       <section>
-        <label>
-          Upload PDF
-          <input
-            type="file"
-            accept="application/pdf,.pdf"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = "";
-              if (file) void upload(file);
-            }}
-          />
-        </label>
         <ul>
           {documents.length === 0 ? <li>No secure documents yet.</li> : null}
           {documents.map((document) => (
