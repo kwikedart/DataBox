@@ -24,8 +24,10 @@ def _refuse_open_worker() -> None:
     audience = os.environ.get("DATABOX_TASK_OIDC_AUDIENCE", "").strip()
     if _production() and not secret and not audience:
         raise RuntimeError("The render worker requires DATABOX_TASK_SECRET or DATABOX_TASK_OIDC_AUDIENCE in production")
-    if os.environ.get("DATABOX_STORAGE", "local").strip().lower() == "local" and _production():
-        raise RuntimeError("DATABOX_STORAGE=local is not allowed in production")
+    from app.storage_mode import local_storage_root, storage_mode
+
+    if storage_mode() != "gcs":
+        local_storage_root()
 
 
 def _secret_matches(request: Request) -> bool:

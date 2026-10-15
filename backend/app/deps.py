@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
@@ -68,14 +67,11 @@ class _Clock:
 
 
 def _storage(settings):
-    mode = os.environ.get("DATABOX_STORAGE", "local").strip().lower()
-    environment = os.environ.get("APP_ENV", os.environ.get("ENVIRONMENT", "development")).strip().lower()
-    if environment in {"production", "prod"} and mode == "local":
-        raise RuntimeError("DATABOX_STORAGE=local is not allowed in production")
-    if mode == "gcs":
+    from app.storage_mode import local_storage_root, storage_mode
+
+    if storage_mode() == "gcs":
         return GcsDataboxStorage(settings.bucket_name)
-    root = os.environ.get("DATABOX_LOCAL_DIR", "data/objects")
-    return LocalFileStorage(Path(__file__).resolve().parents[1] / root)
+    return LocalFileStorage(local_storage_root())
 
 
 def get_databox_application(db: AsyncSession = Depends(get_db_session)) -> DataboxApplication:

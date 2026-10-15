@@ -213,6 +213,37 @@ $env:PYTHONPATH = "."
 .\.venv\Scripts\python -m pytest tests/test_databox.py
 ```
 
+## Host it on a server
+
+This runs the website, API, collaboration socket, and page renderer on one Linux server. Postgres, Redis, and the document files stay on that server and are not published to the internet. Only ports 80 and 443 are opened. You need a domain name, not an IP address, so the server can get a certificate.
+
+On the server, install Docker and Docker Compose, then clone this repository.
+
+```sh
+cd /opt
+git clone https://github.com/kwikedart/DataBox.git databox
+cd databox
+sh deploy/prepare-env.sh
+```
+
+The script asks for the domain, for example `databox.example.com`, and writes `.env.production`. That file holds the generated secrets. Do not commit it. Create a DNS A record from that domain to the server's public IP address, then start the stack:
+
+```sh
+docker compose --env-file .env.production -f docker-compose.prod.yml up --build -d
+```
+
+Open `https://your-domain`. There is no pre-made owner on this stack. Use **Create an organization** and a password of at least 12 characters. Give the organization id on the workspace to anyone who should join.
+
+Document bytes are stored in a private Docker volume at `/var/lib/databox/objects` inside the containers. That mode is `DATABOX_STORAGE=volume`. It is for this single server. A deployment that spreads the API and the renderer across more than one machine should use `DATABOX_STORAGE=gcs` and a private bucket instead.
+
+Watch the logs with:
+
+```sh
+docker compose --env-file .env.production -f docker-compose.prod.yml logs -f api collab web caddy
+```
+
+Stop it with `docker compose --env-file .env.production -f docker-compose.prod.yml down`. Adding `-v` deletes the database, the document files, and the certificate. Do not add `-v` unless you mean to erase them.
+
 ## Production
 
 Set `APP_ENV=production` only with all of these:

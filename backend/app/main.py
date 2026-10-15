@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -19,9 +18,10 @@ from app.security import auth_secret
 
 def _refuse_unsafe_production() -> None:
     auth_secret()
-    environment = os.environ.get("APP_ENV", os.environ.get("ENVIRONMENT", "development")).strip().lower()
-    if environment in {"production", "prod"} and os.environ.get("DATABOX_STORAGE", "local").strip().lower() == "local":
-        raise RuntimeError("DATABOX_STORAGE=local is not allowed in production")
+    from app.storage_mode import local_storage_root, storage_mode
+
+    if storage_mode() != "gcs":
+        local_storage_root()
 
 
 @asynccontextmanager

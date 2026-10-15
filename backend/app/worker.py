@@ -26,12 +26,12 @@ async def _render(organization_id: str, document_id: str, version_id: str) -> di
     from databox.settings import load_databox_settings
 
     settings = load_databox_settings()
-    mode = os.environ.get("DATABOX_STORAGE", "local").strip().lower()
-    if mode == "gcs":
+    from app.storage_mode import local_storage_root, storage_mode
+
+    if storage_mode() == "gcs":
         storage = GcsDataboxStorage(settings.bucket_name)
     else:
-        root = os.environ.get("DATABOX_LOCAL_DIR", "data/objects")
-        storage = LocalFileStorage(Path(__file__).resolve().parents[1] / root)
+        storage = LocalFileStorage(local_storage_root())
     try:
         async with SessionLocal() as session:
             count = await render_stored_version(

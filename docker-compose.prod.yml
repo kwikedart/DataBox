@@ -1,0 +1,107 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - databox_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${DATABOX_REDIS_PASSWORD}"]
+    volumes:
+      - databox_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${DATABOX_REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    env_file: .env.production
+    environment:
+      RUN_MIGRATIONS: "1"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    volumes:
+      - databox_objects:/var/lib/databox
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  collab:
+    build: ./backend
+    env_file: .env.production
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+    command: ["uvicorn", "app.collab_main:app", "--host", "0.0.0.0", "--port", "8001"]
+    volumes:
+      - databox_objects:/var/lib/databox
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  render-worker:
+    build: ./backend
+    env_file: .env.production
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+    command: ["uvicorn", "app.render_main:app", "--host", "0.0.0.0", "--port", "8091"]
+    volumes:
+      - databox_objects:/var/lib/databox
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    depends_on:
+      - api
+      - collab
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DATABOX_DOMAIN: ${DATABOX_DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+    restart: unless-stopped
+
+volumes:
+  databox_pg:
+  databox_redis:
+  databox_objects:
+  caddy_data:
+  caddy_config:
