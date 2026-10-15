@@ -1,0 +1,100 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: databox_postgres
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_USER: databox
+      POSTGRES_PASSWORD: databox_local_password
+      POSTGRES_DB: databox
+    volumes:
+      - databox_pg:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: databox_redis
+    ports:
+      - "6380:6379"
+
+  api:
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: development
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: databox
+      POSTGRES_PASSWORD: databox_local_password
+      POSTGRES_DB: databox
+      DATABOX_STORAGE: local
+      DATABOX_LOCAL_DIR: data/objects
+      DATABOX_REDIS_URL: redis://redis:6379/0
+      DATABOX_RENDER_QUEUE: http
+      DATABOX_RENDER_URL: http://render-worker:8091/internal/tasks/render
+      DATABOX_TASK_SECRET: dev-only-render-task-secret
+      DATABOX_BOOTSTRAP_EMAIL: owner@localhost
+      DATABOX_BOOTSTRAP_PASSWORD: local-test-password
+    volumes:
+      - databox_objects:/app/data/objects
+    depends_on:
+      - postgres
+      - redis
+
+  render-worker:
+    build: ./backend
+    command: uvicorn app.render_main:app --host 0.0.0.0 --port 8091
+    environment:
+      APP_ENV: development
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: databox
+      POSTGRES_PASSWORD: databox_local_password
+      POSTGRES_DB: databox
+      DATABOX_STORAGE: local
+      DATABOX_LOCAL_DIR: data/objects
+      DATABOX_REDIS_URL: redis://redis:6379/0
+      DATABOX_TASK_SECRET: dev-only-render-task-secret
+    volumes:
+      - databox_objects:/app/data/objects
+    depends_on:
+      - postgres
+      - redis
+
+  collab:
+    build: ./backend
+    command: uvicorn app.collab_main:app --host 0.0.0.0 --port 8001
+    ports:
+      - "8001:8001"
+    environment:
+      APP_ENV: development
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: databox
+      POSTGRES_PASSWORD: databox_local_password
+      POSTGRES_DB: databox
+      DATABOX_STORAGE: local
+      DATABOX_LOCAL_DIR: data/objects
+      DATABOX_REDIS_URL: redis://redis:6379/0
+    volumes:
+      - databox_objects:/app/data/objects
+    depends_on:
+      - postgres
+      - redis
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      API_PROXY: http://api:8000
+      COLLAB_PROXY: http://collab:8001
+    depends_on:
+      - api
+      - collab
+
+volumes:
+  databox_pg:
+  databox_objects:

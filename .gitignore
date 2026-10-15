@@ -1,0 +1,14 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+data/
+.pytest_cache/
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
