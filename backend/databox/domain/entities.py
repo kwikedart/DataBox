@@ -35,6 +35,7 @@ class Document:
     case_id: UUID | None = None
     current_version_id: UUID | None = None
     mime_type: str = "application/pdf"
+    visibility: str = "public"
     created_at: datetime | None = None
     updated_at: datetime | None = None
     deleted_at: datetime | None = None
@@ -47,6 +48,8 @@ class Document:
             raise ValidationError("Invalid document status")
         if self.policy_epoch < 1:
             raise ValidationError("Policy epoch must be positive")
+        if self.visibility not in {"public", "private"}:
+            raise ValidationError("Document visibility must be public or private")
         object.__setattr__(self, "title", title)
         object.__setattr__(self, "audience_labels", _labels(self.audience_labels))
         object.__setattr__(self, "restricted_labels", _labels(self.restricted_labels))
@@ -118,6 +121,24 @@ class DocumentPermission:
     def __post_init__(self) -> None:
         if self.role not in {"viewer", "editor"}:
             raise ValidationError("Document grants can only narrow access to viewer or editor")
+
+
+@dataclass(frozen=True, slots=True)
+class AccessRequest:
+    id: UUID
+    organization_id: UUID
+    document_id: UUID
+    user_id: UUID
+    role: str
+    status: str
+    created_at: datetime | None = None
+    decided_by: UUID | None = None
+
+    def __post_init__(self) -> None:
+        if self.role not in {"viewer", "editor"}:
+            raise ValidationError("Access can only be requested as viewer or editor")
+        if self.status not in {"pending", "approved", "denied"}:
+            raise ValidationError("Invalid access request")
 
 
 @dataclass(frozen=True, slots=True)

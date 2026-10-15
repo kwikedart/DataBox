@@ -11,6 +11,7 @@ from uuid import UUID
 from databox.domain.exceptions import ConflictError
 
 from databox.domain.entities import (
+    AccessRequest,
     AuditEvent,
     CollaborationCheckpoint,
     Document,
@@ -29,6 +30,7 @@ class MemoryDataboxStore:
         self.versions: dict[UUID, DocumentVersion] = {}
         self.shares: dict[UUID, ShareLink] = {}
         self.permissions: list[DocumentPermission] = []
+        self.requests: dict[tuple[UUID, UUID], AccessRequest] = {}
         self.members: dict[tuple[UUID, UUID], str] = {}
         self.attributes: dict[tuple[UUID, UUID], MembershipAttributes] = {}
         self.links: dict[UUID, DocumentLink] = {}
@@ -100,6 +102,7 @@ class MemoryDataboxStore:
                 case_id=current.case_id,
                 current_version_id=version.id,
                 mime_type=current.mime_type,
+                visibility=current.visibility,
                 created_at=current.created_at,
                 updated_at=document.updated_at,
                 deleted_at=current.deleted_at,
@@ -173,6 +176,22 @@ class MemoryDataboxStore:
             if not (row.document_id == permission.document_id and row.user_id == permission.user_id)
         ]
         self.permissions.append(permission)
+
+    async def get_access_request(self, organization_id: UUID, document_id: UUID, user_id: UUID) -> AccessRequest | None:
+        row = self.requests.get((document_id, user_id))
+        if row is None or row.organization_id != organization_id:
+            return None
+        return row
+
+    async def save_access_request(self, request: AccessRequest) -> None:
+        self.requests[(request.document_id, request.user_id)] = request
+
+    async def list_access_requests(self, organization_id: UUID, document_id: UUID) -> list[AccessRequest]:
+        return [
+            row
+            for row in self.requests.values()
+            if row.organization_id == organization_id and row.document_id == document_id and row.status == "pending"
+        ]
 
     async def list_permissions(self, organization_id: UUID, document_id: UUID) -> list[DocumentPermission]:
         return [

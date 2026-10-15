@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from databox.infrastructure.rows import (
+    DataboxAccessRequestRow,
     DataboxAuditLogRow,
     DataboxCollaborationCheckpointRow,
     DataboxDocumentLinkRow,
@@ -21,6 +22,7 @@ from databox.infrastructure.rows import (
     DataboxYjsUpdateRow,
 )
 from databox.domain.entities import (
+    AccessRequest,
     AuditEvent,
     CollaborationCheckpoint,
     Document,
@@ -48,9 +50,23 @@ def _document(row: DataboxDocumentRow) -> Document:
         case_id=row.case_id,
         current_version_id=row.current_version_id,
         mime_type=row.mime_type,
+        visibility=row.visibility or "public",
         created_at=row.created_at,
         updated_at=row.updated_at,
         deleted_at=row.deleted_at,
+    )
+
+
+def _access_request(row: DataboxAccessRequestRow) -> AccessRequest:
+    return AccessRequest(
+        id=row.id,
+        organization_id=row.organization_id,
+        document_id=row.document_id,
+        user_id=row.user_id,
+        role=row.role,
+        status=row.status,
+        created_at=row.created_at,
+        decided_by=row.decided_by,
     )
 
 
@@ -127,6 +143,7 @@ class SqlAlchemyDataboxStore:
                     classification_level=document.classification_level,
                     audience_labels=list(document.audience_labels),
                     restricted_labels=list(document.restricted_labels),
+                    visibility=document.visibility,
                     policy_epoch=document.policy_epoch,
                     created_at=document.created_at,
                     updated_at=document.updated_at,
@@ -141,6 +158,7 @@ class SqlAlchemyDataboxStore:
             row.policy_epoch = document.policy_epoch
             row.audience_labels = list(document.audience_labels)
             row.restricted_labels = list(document.restricted_labels)
+            row.visibility = document.visibility
             row.current_version_id = document.current_version_id
             row.updated_at = document.updated_at
             row.deleted_at = document.deleted_at
@@ -387,6 +405,55 @@ class SqlAlchemyDataboxStore:
             row.role = permission.role
             row.granted_by = permission.granted_by
         await self.session.flush()
+
+    async def get_access_request(self, organization_id: UUID, document_id: UUID, user_id: UUID) -> AccessRequest | None:
+        row = await self.session.scalar(
+            select(DataboxAccessRequestRow).where(
+                DataboxAccessRequestRow.organization_id == organization_id,
+                DataboxAccessRequestRow.document_id == document_id,
+                DataboxAccessRequestRow.user_id == user_id,
+            )
+        )
+        return None if row is None else _access_request(row)
+
+    async def save_access_request(self, request: AccessRequest) -> None:
+        row = await self.session.scalar(
+            select(DataboxAccessRequestRow).where(
+                DataboxAccessRequestRow.document_id == request.document_id,
+                DataboxAccessRequestRow.user_id == request.user_id,
+            )
+        )
+        if row is None:
+            self.session.add(
+                DataboxAccessRequestRow(
+                    id=request.id,
+                    organization_id=request.organization_id,
+                    document_id=request.document_id,
+                    user_id=request.user_id,
+                    role=request.role,
+                    status=request.status,
+                    decided_by=request.decided_by,
+                )
+            )
+        else:
+            if row.organization_id != request.organization_id:
+                raise ConflictError("Document version changed")
+            row.role = request.role
+            row.status = request.status
+            row.decided_by = request.decided_by
+        await self.session.flush()
+
+    async def list_access_requests(self, organization_id: UUID, document_id: UUID) -> list[AccessRequest]:
+        rows = (
+            await self.session.scalars(
+                select(DataboxAccessRequestRow).where(
+                    DataboxAccessRequestRow.organization_id == organization_id,
+                    DataboxAccessRequestRow.document_id == document_id,
+                    DataboxAccessRequestRow.status == "pending",
+                )
+            )
+        ).all()
+        return [_access_request(row) for row in rows]
 
     async def list_permissions(self, organization_id: UUID, document_id: UUID) -> list[DocumentPermission]:
         rows = (

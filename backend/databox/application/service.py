@@ -12,6 +12,7 @@ from databox.domain.exceptions import ConflictError, DomainError, NotFoundError,
 from databox.domain.identity import OrganizationRole, TenantIdentity
 
 from databox.domain.entities import (
+    AccessRequest,
     AuditEvent,
     CollaborationCheckpoint,
     CollaborationSession,
@@ -55,6 +56,13 @@ logger = logging.getLogger("databox")
 
 _DOC_EPOCH = "databox:doc-epoch:{0}"
 _SHARE_EPOCH = "databox:share-epoch:{0}"
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentListing:
+    document: Document
+    can_open: bool
+    pending_role: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,19 +144,24 @@ class DataboxApplication:
         direct = None
         if user_id is not None:
             direct = await self.store.get_permission(organization_id, document.id, user_id)
-        via_labels = id_grant_permits(
+        if user_id is not None and user_id == document.created_by:
+            return True, direct, True
+        caller = {label.strip().lower() for label in caller_labels}
+        restricted = {label.strip().lower() for label in document.restricted_labels}
+        if caller & restricted:
+            return False, direct, False
+        named = direct in {"viewer", "editor"}
+        if document.visibility == "private":
+            return named, direct, False
+        labeled = bool(document.audience_labels) and id_grant_permits(
             audience_labels=document.audience_labels,
             restricted_labels=document.restricted_labels,
             caller_labels=caller_labels,
             direct_role=None,
         )
-        allowed = via_labels or id_grant_permits(
-            audience_labels=document.audience_labels,
-            restricted_labels=document.restricted_labels,
-            caller_labels=caller_labels,
-            direct_role=direct,
-        )
-        return allowed, direct, via_labels
+        if labeled:
+            return True, direct, True
+        return named, direct, False
 
     async def _visible(self, actor: TenantIdentity, document_id: UUID, action: str) -> tuple[Document, frozenset[str]]:
         document = require_active_document(
@@ -311,6 +324,7 @@ class DataboxApplication:
             title=title,
             status="active",
             policy_epoch=1,
+            visibility="private",
             case_id=case_id,
             current_version_id=None,
             created_at=now,
@@ -444,6 +458,7 @@ class DataboxApplication:
             status="active",
             policy_epoch=1,
             mime_type="text/plain",
+            visibility="private",
             current_version_id=None,
             created_at=now,
             updated_at=now,
@@ -612,6 +627,7 @@ class DataboxApplication:
             case_id=document.case_id,
             current_version_id=document.current_version_id,
             mime_type=document.mime_type,
+            visibility=document.visibility,
             created_at=document.created_at,
             updated_at=now,
             deleted_at=document.deleted_at,
@@ -673,25 +689,57 @@ class DataboxApplication:
         )
         return version
 
-    async def list_documents(self, *, actor: TenantIdentity, case_id: UUID | None = None) -> list[Document]:
+    async def list_documents(self, *, actor: TenantIdentity, case_id: UUID | None = None) -> list[DocumentListing]:
         rows = await self.store.list_documents(actor.organization_id, case_id)
-        visible: list[Document] = []
+        visible: list[DocumentListing] = []
         for document in rows:
             if document.status != "active":
                 continue
             allowed, direct, via_labels = await self._opening(actor.organization_id, actor.user_id, document)
-            if not allowed:
+            if document.visibility != "public" and not allowed:
                 continue
             actions = org_actions(actor.role)
-            if not via_labels:
+            if allowed and not via_labels:
                 actions = narrow_actions(actions, direct)
-            if "read" in actions:
-                visible.append(document)
+            if allowed and "read" not in actions:
+                continue
+            pending = None
+            if not allowed:
+                request = await self.store.get_access_request(actor.organization_id, document.id, actor.user_id)
+                if request is not None and request.status == "pending":
+                    pending = request.role
+            visible.append(DocumentListing(document=document, can_open=allowed, pending_role=pending))
         return visible
+
+    async def _managed(self, actor: TenantIdentity, document_id: UUID) -> Document:
+        document = require_active_document(
+            await self.store.get_document(actor.organization_id, document_id),
+            organization_id=actor.organization_id,
+        )
+        if actor.user_id == document.created_by:
+            return document
+        if "manage_shares" in org_actions(actor.role) and document.visibility == "public":
+            return document
+        raise NotFoundError("Document not found")
 
     async def get_document(self, *, actor: TenantIdentity, document_id: UUID) -> Document:
         document, _actions = await self._visible(actor, document_id, "read")
         return document
+
+    async def inspect_document(self, *, actor: TenantIdentity, document_id: UUID) -> DocumentListing:
+        document = require_active_document(
+            await self.store.get_document(actor.organization_id, document_id),
+            organization_id=actor.organization_id,
+        )
+        allowed, _direct, _via_labels = await self._opening(actor.organization_id, actor.user_id, document)
+        if document.visibility != "public" and not allowed:
+            raise NotFoundError("Document not found")
+        pending = None
+        if not allowed:
+            request = await self.store.get_access_request(actor.organization_id, document.id, actor.user_id)
+            if request is not None and request.status == "pending":
+                pending = request.role
+        return DocumentListing(document=document, can_open=allowed, pending_role=pending)
 
     async def list_versions(self, *, actor: TenantIdentity, document_id: UUID) -> list[DocumentVersion]:
         await self._visible(actor, document_id, "read")
@@ -724,7 +772,7 @@ class DataboxApplication:
         audience_labels: tuple[str, ...],
         restricted_labels: tuple[str, ...],
     ) -> Document:
-        document, _actions = await self._visible(actor, document_id, "manage_shares")
+        document = await self._managed(actor, document_id)
         now = self._now()
         updated = Document(
             id=document.id,
@@ -739,6 +787,7 @@ class DataboxApplication:
             case_id=document.case_id,
             current_version_id=document.current_version_id,
             mime_type=document.mime_type,
+            visibility=document.visibility,
             created_at=document.created_at,
             updated_at=now,
             deleted_at=document.deleted_at,
@@ -769,7 +818,7 @@ class DataboxApplication:
     async def grant_permission(
         self, *, actor: TenantIdentity, document_id: UUID, user_id: UUID, role: str
     ) -> DocumentPermission:
-        document, _actions = await self._visible(actor, document_id, "manage_shares")
+        document = await self._managed(actor, document_id)
         if user_id == actor.user_id:
             raise ValidationError("Share with another person's user id")
         if await self.store.get_member_role(actor.organization_id, user_id) is None:
@@ -798,12 +847,134 @@ class DataboxApplication:
         await self._publish_epoch(_DOC_EPOCH.format(document.id), bumped.policy_epoch)
         return permission
 
+    async def set_visibility(self, *, actor: TenantIdentity, document_id: UUID, visibility: str) -> Document:
+        document = await self._managed(actor, document_id)
+        if visibility not in {"public", "private"}:
+            raise ValidationError("Document visibility must be public or private")
+        updated = Document(
+            id=document.id,
+            organization_id=document.organization_id,
+            created_by=document.created_by,
+            title=document.title,
+            status=document.status,
+            policy_epoch=document.policy_epoch + 1,
+            classification_level=document.classification_level,
+            audience_labels=document.audience_labels,
+            restricted_labels=document.restricted_labels,
+            case_id=document.case_id,
+            current_version_id=document.current_version_id,
+            mime_type=document.mime_type,
+            visibility=visibility,
+            created_at=document.created_at,
+            updated_at=self._now(),
+            deleted_at=document.deleted_at,
+        )
+        await self.store.save_document(updated)
+        await self.transaction.commit()
+        await self._publish_epoch(_DOC_EPOCH.format(updated.id), updated.policy_epoch)
+        return updated
+
+    async def request_access(self, *, actor: TenantIdentity, document_id: UUID, role: str) -> AccessRequest:
+        listing = await self.inspect_document(actor=actor, document_id=document_id)
+        document = listing.document
+        if document.visibility != "public" or actor.user_id == document.created_by:
+            raise NotFoundError("Document not found")
+        if listing.can_open:
+            raise ValidationError("You already have access to this document")
+        if role not in {"viewer", "editor"}:
+            raise ValidationError("Access can only be requested as viewer or editor")
+        request = AccessRequest(
+            id=uuid4(),
+            organization_id=actor.organization_id,
+            document_id=document.id,
+            user_id=actor.user_id,
+            role=role,
+            status="pending",
+            created_at=self._now(),
+        )
+        await self.store.save_access_request(request)
+        await self._audit(
+            organization_id=actor.organization_id,
+            actor_user_id=actor.user_id,
+            document_id=document.id,
+            action="access.request",
+            resource_type="access_request",
+            resource_id=request.id,
+            outcome="success",
+        )
+        await self.transaction.commit()
+        return request
+
+    async def list_access_requests(self, *, actor: TenantIdentity, document_id: UUID) -> list[AccessRequest]:
+        document = await self._managed(actor, document_id)
+        return await self.store.list_access_requests(document.organization_id, document.id)
+
+    async def decide_access_request(
+        self, *, actor: TenantIdentity, document_id: UUID, request_id: UUID, approve: bool
+    ) -> None:
+        document = await self._managed(actor, document_id)
+        pending = await self.store.list_access_requests(document.organization_id, document.id)
+        request = next((row for row in pending if row.id == request_id), None)
+        if request is None:
+            raise NotFoundError("Document not found")
+        if not approve:
+            await self.store.save_access_request(
+                AccessRequest(
+                    id=request.id,
+                    organization_id=request.organization_id,
+                    document_id=request.document_id,
+                    user_id=request.user_id,
+                    role=request.role,
+                    status="denied",
+                    created_at=request.created_at,
+                    decided_by=actor.user_id,
+                )
+            )
+            await self.transaction.commit()
+            return
+        if await self.store.get_member_role(actor.organization_id, request.user_id) is None:
+            raise NotFoundError("Document not found")
+        permission = DocumentPermission(
+            id=uuid4(),
+            organization_id=actor.organization_id,
+            document_id=document.id,
+            user_id=request.user_id,
+            role=request.role,
+            granted_by=actor.user_id,
+        )
+        bumped = await self._bump_document(document)
+        await self.store.save_permission(permission)
+        await self.store.save_document(bumped)
+        await self.store.save_access_request(
+            AccessRequest(
+                id=request.id,
+                organization_id=request.organization_id,
+                document_id=request.document_id,
+                user_id=request.user_id,
+                role=request.role,
+                status="approved",
+                created_at=request.created_at,
+                decided_by=actor.user_id,
+            )
+        )
+        await self._audit(
+            organization_id=actor.organization_id,
+            actor_user_id=actor.user_id,
+            document_id=document.id,
+            action="access.approve",
+            resource_type="access_request",
+            resource_id=request.id,
+            outcome="success",
+        )
+        await self.transaction.commit()
+        await self._publish_epoch(_DOC_EPOCH.format(document.id), bumped.policy_epoch)
+
     async def list_user_shares(self, *, actor: TenantIdentity, document_id: UUID) -> list[DocumentPermission]:
-        document, _actions = await self._visible(actor, document_id, "manage_shares")
+        document = await self._managed(actor, document_id)
         return await self.store.list_permissions(document.organization_id, document.id)
 
     async def revoke_user_share(self, *, actor: TenantIdentity, document_id: UUID, user_id: UUID) -> None:
-        document, _actions = await self._visible(actor, document_id, "manage_shares")
+        document = await self._managed(actor, document_id)
         removed = await self.store.delete_permission(actor.organization_id, document.id, user_id)
         if not removed:
             raise ValidationError("That user is not shared on this document")
@@ -835,6 +1006,7 @@ class DataboxApplication:
             case_id=document.case_id,
             current_version_id=document.current_version_id,
             mime_type=document.mime_type,
+            visibility=document.visibility,
             created_at=document.created_at,
             updated_at=self._now(),
             deleted_at=document.deleted_at,
@@ -850,7 +1022,7 @@ class DataboxApplication:
         idempotency_key: str | None = None,
         version_id: UUID | None = None,
     ) -> ShareCreated:
-        document, _actions = await self._visible(actor, document_id, "manage_shares")
+        document = await self._managed(actor, document_id)
         now = self._now()
         assert_share_request(
             permission=permission,
@@ -910,7 +1082,7 @@ class DataboxApplication:
         share = await self.store.get_share(actor.organization_id, share_id)
         if share is None:
             raise NotFoundError("Share link not found")
-        await self._visible(actor, share.document_id, "manage_shares")
+        await self._managed(actor, share.document_id)
         if share.revoked_at is not None:
             return share
         revoked = _share_with(share, policy_epoch=share.policy_epoch + 1, revoked_at=self._now())
@@ -930,7 +1102,7 @@ class DataboxApplication:
 
     async def list_version_shares(self, *, actor: TenantIdentity, document_id: UUID) -> list[VersionShare]:
         """Return the standing edit and view links. Managers can read them on every visit."""
-        document, _actions = await self._visible(actor, document_id, "manage_shares")
+        document = await self._managed(actor, document_id)
         if document.current_version_id is None:
             return []
         await self._ensure_version_shares(actor, document)
@@ -1023,6 +1195,7 @@ class DataboxApplication:
             case_id=document.case_id,
             current_version_id=document.current_version_id,
             mime_type=document.mime_type,
+            visibility=document.visibility,
             created_at=document.created_at,
             updated_at=now,
             deleted_at=document.deleted_at,
@@ -1059,7 +1232,7 @@ class DataboxApplication:
             resource_id=version_id,
             outcome="success",
         )
-        if "manage_shares" in org_actions(actor.role):
+        if actor.user_id == saved.created_by or "manage_shares" in org_actions(actor.role):
             await self._ensure_version_shares(actor, saved)
         return saved
 
@@ -1111,7 +1284,7 @@ class DataboxApplication:
         ttl_seconds: int,
     ) -> VersionShare:
         """Replace one version's link with a new token that expires after the chosen lifetime."""
-        document, _actions = await self._visible(actor, document_id, "manage_shares")
+        document = await self._managed(actor, document_id)
         version = await self.store.get_version(actor.organization_id, version_id)
         if version is None or version.document_id != document.id:
             raise NotFoundError("Document not found")
@@ -1645,6 +1818,7 @@ class DataboxApplication:
             case_id=document.case_id,
             current_version_id=document.current_version_id,
             mime_type=document.mime_type,
+            visibility=document.visibility,
             created_at=document.created_at,
             updated_at=now,
             deleted_at=now,

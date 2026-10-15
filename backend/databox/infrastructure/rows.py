@@ -63,9 +63,24 @@ class DataboxDocumentRow(Base):
     audience_labels: Mapped[list] = mapped_column(ARRAY(Text), nullable=False, server_default="{}")
     restricted_labels: Mapped[list] = mapped_column(ARRAY(Text), nullable=False, server_default="{}")
     policy_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
+    visibility: Mapped[str] = mapped_column(String(20), nullable=False, default="public", server_default="public")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DataboxAccessRequestRow(Base):
+    __tablename__ = "databox_access_requests"
+    __table_args__ = (UniqueConstraint("document_id", "user_id", name="uq_databox_access_request_user"),)
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    document_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("databox_documents.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    decided_by: Mapped[Optional[UUID]] = mapped_column(PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class DataboxDocumentVersionRow(Base):

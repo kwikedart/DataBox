@@ -56,20 +56,25 @@ export function DocumentPage({ session }: { session: Session }) {
   const [personRole, setPersonRole] = useState("viewer");
   const [people, setPeople] = useState<{ userId: string; role: string }[]>([]);
   const [editor, setEditor] = useState<ReturnType<typeof connectCollaboration> | null>(null);
+  const [requests, setRequests] = useState<{ requestId: string; userId: string; role: string }[]>([]);
   const canManage = session.role === "owner" || session.role === "admin";
+  const canShare = canManage || documentRow?.createdBy === session.userId;
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      const [metadata, history] = await Promise.all([
-        api<DocumentRow>(`/api/v1/documents/${documentId}`, session),
-        api<{ versions: VersionRow[] }>(`/api/v1/documents/${documentId}/versions`, session),
-      ]);
+      const metadata = await api<DocumentRow>(`/api/v1/documents/${documentId}`, session);
       if (cancelled) return;
       setDocumentRow(metadata);
-      setVersions(history.versions);
       setAudience(metadata.audienceLabels.join(", "));
       setRestricted(metadata.restrictedLabels.join(", "));
+      if (metadata.canOpen === false) {
+        setVersions([]);
+        return;
+      }
+      const history = await api<{ versions: VersionRow[] }>(`/api/v1/documents/${documentId}/versions`, session);
+      if (cancelled) return;
+      setVersions(history.versions);
     }
     load().catch((err: unknown) => setError(err instanceof Error ? err.message : "Document is unavailable"));
     return () => {
@@ -78,7 +83,7 @@ export function DocumentPage({ session }: { session: Session }) {
   }, [documentId, session]);
 
   useEffect(() => {
-    if (!canManage) return;
+    if (!canShare) return;
     let cancelled = false;
     api<{ links: VersionLink[] }>(`/api/v1/documents/${documentId}/shares`, session)
       .then((payload) => {
@@ -94,13 +99,23 @@ export function DocumentPage({ session }: { session: Session }) {
       .catch(() => {
         if (!cancelled) setPeople([]);
       });
+    api<{ requests: { requestId: string; userId: string; role: string }[] }>(
+      `/api/v1/documents/${documentId}/access-requests`,
+      session,
+    )
+      .then((payload) => {
+        if (!cancelled) setRequests(payload.requests);
+      })
+      .catch(() => {
+        if (!cancelled) setRequests([]);
+      });
     return () => {
       cancelled = true;
     };
-  }, [canManage, documentId, documentRow?.currentVersionId, session]);
+  }, [canShare, documentId, documentRow?.currentVersionId, session]);
 
   useEffect(() => {
-    if (documentRow?.mimeType !== "text/plain" || !documentRow.currentVersionId) return;
+    if (documentRow?.canOpen === false || documentRow?.mimeType !== "text/plain" || !documentRow.currentVersionId) return;
     let cancelled = false;
     let connection: ReturnType<typeof connectCollaboration> | null = null;
     setReady(false);
@@ -188,7 +203,7 @@ export function DocumentPage({ session }: { session: Session }) {
   }
 
   async function reloadShares() {
-    if (!canManage) return;
+    if (!canShare) return;
     const payload = await api<{ links: VersionLink[] }>(`/api/v1/documents/${documentId}/shares`, session);
     setLinks(payload.links);
   }
@@ -314,7 +329,50 @@ export function DocumentPage({ session }: { session: Session }) {
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Collaboration is unavailable"));
   }
 
+  async function requestAccess(role: "viewer" | "editor") {
+    setError("");
+    try {
+      await api(`/api/v1/documents/${documentId}/access-requests`, session, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role }),
+      });
+      setDocumentRow((current) => (current ? { ...current, pendingRequest: role } : current));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The request was not sent");
+    }
+  }
+
+  async function setVisibility(visibility: "public" | "private") {
+    setError("");
+    try {
+      const saved = await api<DocumentRow>(`/api/v1/documents/${documentId}/visibility`, session, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visibility }),
+      });
+      setDocumentRow(saved);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Visibility was not saved");
+    }
+  }
+
+  async function decideRequest(requestId: string, approve: boolean) {
+    setError("");
+    try {
+      await api(`/api/v1/documents/${documentId}/access-requests/${requestId}`, session, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approve }),
+      });
+      setRequests((current) => current.filter((request) => request.requestId !== requestId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The request was not updated");
+    }
+  }
+
   const textDocument = documentRow?.mimeType === "text/plain";
+  const locked = documentRow?.canOpen === false;
 
   return (
     <main>
@@ -323,6 +381,20 @@ export function DocumentPage({ session }: { session: Session }) {
         <Link to="/">Workspace</Link>
       </p>
       {error ? <p className="error">{error}</p> : null}
+      {locked ? (
+        <section>
+          <p>This public document is visible to your organization. It opens when it is shared with you or tagged with one of your labels.</p>
+          {documentRow?.pendingRequest ? (
+            <p className="hint">Asked for {documentRow.pendingRequest === "editor" ? "edit" : "view"} access</p>
+          ) : (
+            <>
+              <button type="button" onClick={() => void requestAccess("viewer")}>Ask to view</button>
+              <button type="button" className="secondary" onClick={() => void requestAccess("editor")}>Ask to edit</button>
+            </>
+          )}
+        </section>
+      ) : null}
+      {locked ? null : (
       <section>
         {textDocument ? (
           <button type="button" onClick={() => void saveVersion()} disabled={saving || !documentRow?.currentVersionId}>
@@ -384,7 +456,21 @@ export function DocumentPage({ session }: { session: Session }) {
         {textDocument && editor && ready ? <CollaborativeText doc={editor.doc} canEdit={canEdit} /> : null}
         {textDocument && editor && !ready ? <p className="hint">Opening the shared editor</p> : null}
         {pageUrl ? <img className="page" alt="Document page" src={pageUrl} /> : null}
-        {!canManage ? null : (
+        {locked || !canShare ? null : (
+          <>
+            <p className="hint">This document is {documentRow?.visibility === "public" ? "public" : "private"}.</p>
+            <button type="button" className="secondary" onClick={() => void setVisibility("public")}>Make public</button>
+            <button type="button" className="secondary" onClick={() => void setVisibility("private")}>Make private</button>
+            {requests.map((request) => (
+              <p key={request.requestId}>
+                {request.userId} asked to {request.role === "editor" ? "edit" : "view"}
+                <button type="button" onClick={() => void decideRequest(request.requestId, true)}>Allow</button>
+                <button type="button" className="secondary" onClick={() => void decideRequest(request.requestId, false)}>Deny</button>
+              </p>
+            ))}
+          </>
+        )}
+        {!canShare ? null : (
           <>
             <label>
               Share with user id
@@ -427,7 +513,7 @@ export function DocumentPage({ session }: { session: Session }) {
                 onChange={(event) => setAudience(event.target.value)}
               />
             </label>
-            <p className="hint">People with one of these labels can open this document. Leave this empty while it should stay open to the organization.</p>
+            <p className="hint">People with one of these labels can open this public document. A private document still opens only for the people you share it with.</p>
             <label>
               Blocked for
               <input
@@ -501,6 +587,7 @@ export function DocumentPage({ session }: { session: Session }) {
           })}
         </ul>
       </section>
+      )}
     </main>
   );
 }

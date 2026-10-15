@@ -65,6 +65,18 @@ class TextDocumentRequest(BaseModel):
     title: str = Field(min_length=1, max_length=255)
 
 
+class VisibilityRequest(BaseModel):
+    visibility: str
+
+
+class AccessRequestBody(BaseModel):
+    role: str
+
+
+class AccessDecisionRequest(BaseModel):
+    approve: bool
+
+
 def _http(exc: Exception) -> HTTPException:
     if isinstance(exc, DomainError) and exc.code == "rate_limited":
         return HTTPException(status_code=429, detail="Too many requests")
@@ -87,7 +99,7 @@ def _http(exc: Exception) -> HTTPException:
     return HTTPException(status_code=503, detail="Document service is unavailable")
 
 
-def _document_payload(document) -> dict:
+def _document_payload(document, *, can_open: bool = True, pending_request: str | None = None) -> dict:
     return {
         "documentId": str(document.id),
         "title": document.title,
@@ -98,6 +110,10 @@ def _document_payload(document) -> dict:
         "audienceLabels": list(document.audience_labels),
         "restrictedLabels": list(document.restricted_labels),
         "mimeType": document.mime_type,
+        "visibility": document.visibility,
+        "createdBy": str(document.created_by),
+        "canOpen": can_open,
+        "pendingRequest": pending_request,
     }
 
 
@@ -159,7 +175,12 @@ async def list_documents(
         rows = await application.list_documents(actor=actor, case_id=case_id)
     except DomainError as exc:
         raise _http(exc) from exc
-    return {"documents": [_document_payload(row) for row in rows]}
+    return {
+        "documents": [
+            _document_payload(row.document, can_open=row.can_open, pending_request=row.pending_role)
+            for row in rows
+        ]
+    }
 
 
 @router.get("/documents/{document_id}")
@@ -169,13 +190,13 @@ async def get_document(
     application: DataboxApplication = Depends(get_databox_application),
 ):
     try:
-        document = await application.get_document(
+        listing = await application.inspect_document(
             actor=actor,
             document_id=document_id,
         )
     except DomainError as exc:
         raise _http(exc) from exc
-    return _document_payload(document)
+    return _document_payload(listing.document, can_open=listing.can_open, pending_request=listing.pending_role)
 
 
 @router.post("/documents/{document_id}/versions", status_code=201)
@@ -535,6 +556,76 @@ async def grant_permission(
     except DomainError as exc:
         raise _http(exc) from exc
     return {"documentId": str(permission.document_id), "userId": str(permission.user_id), "role": permission.role}
+
+
+@router.post("/documents/{document_id}/visibility")
+async def set_visibility(
+    document_id: UUID,
+    payload: VisibilityRequest,
+    actor=Depends(get_actor),
+    application: DataboxApplication = Depends(get_databox_application),
+):
+    try:
+        document = await application.set_visibility(
+            actor=actor,
+            document_id=document_id,
+            visibility=payload.visibility,
+        )
+    except DomainError as exc:
+        raise _http(exc) from exc
+    return _document_payload(document)
+
+
+@router.post("/documents/{document_id}/access-requests", status_code=201)
+async def request_access(
+    document_id: UUID,
+    payload: AccessRequestBody,
+    actor=Depends(get_actor),
+    application: DataboxApplication = Depends(get_databox_application),
+):
+    try:
+        request = await application.request_access(actor=actor, document_id=document_id, role=payload.role)
+    except DomainError as exc:
+        raise _http(exc) from exc
+    return {"requestId": str(request.id), "role": request.role, "status": request.status}
+
+
+@router.get("/documents/{document_id}/access-requests")
+async def list_access_requests(
+    document_id: UUID,
+    actor=Depends(get_actor),
+    application: DataboxApplication = Depends(get_databox_application),
+):
+    try:
+        requests = await application.list_access_requests(actor=actor, document_id=document_id)
+    except DomainError as exc:
+        raise _http(exc) from exc
+    return {
+        "requests": [
+            {"requestId": str(row.id), "userId": str(row.user_id), "role": row.role, "status": row.status}
+            for row in requests
+        ]
+    }
+
+
+@router.post("/documents/{document_id}/access-requests/{request_id}")
+async def decide_access_request(
+    document_id: UUID,
+    request_id: UUID,
+    payload: AccessDecisionRequest,
+    actor=Depends(get_actor),
+    application: DataboxApplication = Depends(get_databox_application),
+):
+    try:
+        await application.decide_access_request(
+            actor=actor,
+            document_id=document_id,
+            request_id=request_id,
+            approve=payload.approve,
+        )
+    except DomainError as exc:
+        raise _http(exc) from exc
+    return {"ok": True}
 
 
 @router.get("/documents/{document_id}/permissions")

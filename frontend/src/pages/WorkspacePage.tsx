@@ -43,6 +43,20 @@ export function WorkspacePage({ session, onSignOut }: { session: Session; onSign
     }
   }
 
+  async function requestAccess(documentId: string, role: "viewer" | "editor") {
+    setError("");
+    try {
+      await api(`/api/v1/documents/${documentId}/access-requests`, session, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role }),
+      });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The request was not sent");
+    }
+  }
+
   async function createDocument(event: FormEvent) {
     event.preventDefault();
     const nextTitle = title.trim();
@@ -71,7 +85,11 @@ export function WorkspacePage({ session, onSignOut }: { session: Session; onSign
         Your user id
         <input readOnly value={session.userId} aria-label="Your user id" />
       </label>
-      <p className="hint">Give this id to an owner when a document should stay open for you.</p>
+      <label>
+        Organization id
+        <input readOnly value={session.organizationId} aria-label="Organization id" />
+      </label>
+      <p className="hint">People join this organization with that id. Share a document with a user id, or tag it with their label.</p>
       {error ? <p className="error">{error}</p> : null}
       <form onSubmit={(event) => void createDocument(event)}>
         <label>
@@ -88,6 +106,21 @@ export function WorkspacePage({ session, onSignOut }: { session: Session; onSign
           {documents.map((document) => (
             <li key={document.documentId}>
               <Link to={`/documents/${document.documentId}`}>{document.title}</Link>
+              {document.visibility === "private" ? " (private)" : " (public)"}
+              {document.canOpen === false ? (
+                document.pendingRequest ? (
+                  <p className="hint">Asked for {document.pendingRequest === "editor" ? "edit" : "view"} access</p>
+                ) : (
+                  <>
+                    <button type="button" className="secondary" onClick={() => void requestAccess(document.documentId, "viewer")}>
+                      Ask to view
+                    </button>
+                    <button type="button" className="secondary" onClick={() => void requestAccess(document.documentId, "editor")}>
+                      Ask to edit
+                    </button>
+                  </>
+                )
+              ) : null}
             </li>
           ))}
         </ul>
@@ -102,7 +135,7 @@ export function WorkspacePage({ session, onSignOut }: { session: Session; onSign
                 onChange={(event) => setMyLabels(event.target.value)}
               />
             </label>
-            <p className="hint">These labels decide which labeled PDFs you can open.</p>
+            <p className="hint">A public document opens for people who have one of these labels, and stays closed for people who have a blocked label.</p>
             <button type="submit">Save my labels</button>
           </form>
         ) : null}

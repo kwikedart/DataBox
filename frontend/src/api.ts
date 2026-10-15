@@ -14,6 +14,10 @@ export type DocumentRow = {
   audienceLabels: string[];
   restrictedLabels: string[];
   mimeType?: string;
+  visibility?: string;
+  createdBy?: string;
+  canOpen?: boolean;
+  pendingRequest?: string | null;
 };
 
 export type VersionRow = {

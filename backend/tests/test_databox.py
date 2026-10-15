@@ -88,6 +88,17 @@ def actor(role: str, organization_id=None, user_id=None) -> TenantIdentity:
     )
 
 
+def test_signup_email_requires_one_at_sign() -> None:
+    from app.auth_routes import _email_is_valid
+
+    assert _email_is_valid("owner@localhost")
+    assert _email_is_valid("person@example.com")
+    assert not _email_is_valid("not-an-email")
+    assert not _email_is_valid("a b@example.com")
+    assert not _email_is_valid("@example.com")
+    assert not _email_is_valid("person@")
+
+
 def test_label_ceiling_denies_caller_without_audience() -> None:
     assert labels_permit(audience_labels=("manager",), restricted_labels=(), caller_labels=frozenset()) is False
     assert labels_permit(
@@ -158,7 +169,7 @@ async def test_upload_lists_for_editor_and_hides_from_other_org() -> None:
     with pytest.raises(NotFoundError):
         await application.get_document(actor=outsider, document_id=document.id)
     listed = await application.list_documents(actor=editor)
-    assert [row.id for row in listed] == [document.id]
+    assert [row.document.id for row in listed] == [document.id]
 
 
 @pytest.mark.asyncio
@@ -240,14 +251,16 @@ async def test_share_link_is_hashed_and_label_ceiling_blocks_it() -> None:
             permission="editor",
             expires_at=NOW + timedelta(hours=2),
         )
+    await application.set_visibility(actor=owner, document_id=document.id, visibility="public")
     await application.set_labels(
         actor=owner,
         document_id=document.id,
         audience_labels=("manager",),
         restricted_labels=(),
     )
+    blocked = actor("member", organization_id=owner.organization_id)
     with pytest.raises(NotFoundError):
-        await application.resolve_share(actor=owner, token=created.url_token, caller_key="client-2")
+        await application.resolve_share(actor=blocked, token=created.url_token, caller_key="client-2")
     customer = actor("member", organization_id=owner.organization_id)
     await application.set_membership_labels(actor=owner, user_id=customer.user_id, labels=("manager",))
     allowed = await application.resolve_share(actor=customer, token=created.url_token, caller_key="customer")
@@ -343,8 +356,9 @@ async def test_view_token_page_check_ignores_later_policy_changes() -> None:
     await application.set_labels(actor=owner, document_id=document.id, audience_labels=("manager",), restricted_labels=())
     still_valid = await application.authorize_page(token=token, document_id=document.id, page=1)
     assert still_valid.object_key == grant.object_key
+    stranger = actor("member", organization_id=owner.organization_id)
     with pytest.raises(NotFoundError):
-        await application.issue_view_token(actor=owner, document_id=document.id)
+        await application.issue_view_token(actor=stranger, document_id=document.id)
     claims = read_view_token(token, secret="view-secret", now=NOW)
     assert "download" not in claims.scope
     assert claims.page_count == 1
@@ -382,7 +396,7 @@ async def test_cascade_does_not_grant_unlinked_or_deeper_documents() -> None:
     with pytest.raises(NotFoundError):
         await application.issue_view_token(actor=owner, document_id=hidden.id, parent_token=child)
     links = await application.list_links(actor=owner, document_id=target.id)
-    assert links == []
+    assert [link.target_document_id for link in links] == [hidden.id]
 
 
 @pytest.mark.asyncio
@@ -453,7 +467,7 @@ async def test_user_id_share_opens_a_labeled_document_until_it_is_removed() -> N
     assert (await application.get_document(actor=customer, document_id=document.id)).id == document.id
     with pytest.raises(NotFoundError):
         await application.get_document(actor=other, document_id=document.id)
-    assert [row.id for row in await application.list_documents(actor=customer)] == [document.id]
+    assert [row.document.id for row in await application.list_documents(actor=customer)] == [document.id]
     assert await application.list_documents(actor=other) == []
     shares = await application.list_user_shares(actor=owner, document_id=document.id)
     assert [(row.user_id, row.role) for row in shares] == [(customer.user_id, "editor")]
@@ -495,6 +509,36 @@ async def test_user_id_share_opens_a_labeled_document_until_it_is_removed() -> N
 
 
 @pytest.mark.asyncio
+async def test_public_document_is_listed_and_opens_after_the_creator_approves() -> None:
+    application, store, _storage = build()
+    organization_id = uuid4()
+    creator = actor("member", organization_id=organization_id)
+    colleague = actor("member", organization_id=organization_id)
+    store.members[(organization_id, creator.user_id)] = "member"
+    store.members[(organization_id, colleague.user_id)] = "member"
+    private_doc = await application.create_text_document(actor=creator, title="Private notes")
+    public_doc = await application.create_text_document(actor=creator, title="Public notes")
+    await application.set_visibility(actor=creator, document_id=public_doc.id, visibility="public")
+    listed = await application.list_documents(actor=colleague)
+    assert [row.document.id for row in listed] == [public_doc.id]
+    assert listed[0].can_open is False
+    with pytest.raises(NotFoundError):
+        await application.get_document(actor=colleague, document_id=public_doc.id)
+    with pytest.raises(NotFoundError):
+        await application.get_document(actor=colleague, document_id=private_doc.id)
+    request = await application.request_access(actor=colleague, document_id=public_doc.id, role="editor")
+    await application.decide_access_request(
+        actor=creator,
+        document_id=public_doc.id,
+        request_id=request.id,
+        approve=True,
+    )
+    assert (await application.get_document(actor=colleague, document_id=public_doc.id)).id == public_doc.id
+    with pytest.raises(NotFoundError):
+        await application.get_document(actor=colleague, document_id=private_doc.id)
+
+
+@pytest.mark.asyncio
 async def test_failed_commit_abandons_unreferenced_object() -> None:
     application, store, storage = build()
     editor = actor("member")
@@ -516,11 +560,13 @@ async def test_failed_commit_abandons_unreferenced_object() -> None:
 
 @pytest.mark.asyncio
 async def test_collaboration_rejects_viewers_and_keeps_both_updates() -> None:
-    application, _store, _storage = build()
+    application, store, _storage = build()
     organization_id = uuid4()
     editor = actor("member", organization_id=organization_id)
     viewer = actor("viewer", organization_id=organization_id)
     document = await application.create_document(actor=editor, title="Notes", content=PDF)
+    store.members[(organization_id, viewer.user_id)] = "viewer"
+    await application.grant_permission(actor=editor, document_id=document.id, user_id=viewer.user_id, role="viewer")
     editor_ticket = await application.open_collaboration(actor=editor, document_id=document.id)
     viewer_ticket = await application.open_collaboration(actor=viewer, document_id=document.id)
     editor_session = await application.accept_collaboration_ticket(document_id=document.id, ticket=editor_ticket)
@@ -841,11 +887,13 @@ async def test_missing_page_enqueues_render_without_rasterizing() -> None:
 async def test_collaboration_reloads_snapshot_and_ignores_viewer_frames() -> None:
     from pycrdt import Map, create_update_message
 
-    application, _store, _storage = build(settings(snapshot_every_updates=1))
+    application, store, _storage = build(settings(snapshot_every_updates=1))
     organization_id = uuid4()
     editor = actor("member", organization_id=organization_id)
     viewer = actor("viewer", organization_id=organization_id)
     document = await application.create_document(actor=editor, title="Notes", content=PDF)
+    store.members[(organization_id, viewer.user_id)] = "viewer"
+    await application.grant_permission(actor=editor, document_id=document.id, user_id=viewer.user_id, role="viewer")
     editor_session = await application.accept_collaboration_ticket(
         document_id=document.id,
         ticket=await application.open_collaboration(actor=editor, document_id=document.id),
