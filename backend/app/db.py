@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import ssl
 from collections.abc import AsyncIterator
 from urllib.parse import quote_plus
 
@@ -35,9 +36,13 @@ def sync_database_url() -> str:
 
 
 def _engine_connect_args() -> dict:
+    """Encrypt Render connections without requiring the internal hostname to match the certificate."""
     if not os.environ.get("DATABASE_URL", "").strip():
         return {}
-    return {"ssl": True}
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return {"ssl": context, "statement_cache_size": 0}
 
 
 engine = create_async_engine(database_url(), pool_pre_ping=True, connect_args=_engine_connect_args())
