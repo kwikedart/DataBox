@@ -95,76 +95,120 @@ The editor shares a Yjs document. The server persists each accepted update befor
 
 ## What you need
 
-- Docker Desktop running
+- Docker Desktop, running
 - Python 3.12
+- Node.js 18 or newer
 
-The local database password in `.env.example` is only for the Docker Postgres container on your machine. Change it in both `docker-compose.yml` and `backend/.env` if you want a different one. Do not send that password, or any real secret, in chat.
+The password in `backend/.env.example` is only for the Postgres container on your machine. Change it in both `docker-compose.yml` and `backend/.env` if you want a different one. Do not send that password, or any real secret, in chat.
 
-## Start it
+## Run it on your machine
 
-Open PowerShell.
+Use four terminals after the database is up. Start them from the repository root. On Windows, the Python commands below are for PowerShell.
 
-**1. Database and Redis**
+**1. Postgres and Redis**
 
-Redis is published on port **6380** so it does not collide with anything already using 6379.
+Redis is published on port **6380** so it does not collide with anything already using 6379. Postgres is published on port **5434**.
 
 ```powershell
-cd D:\Intern\databox
-docker compose up -d
+docker compose up -d postgres redis
 ```
 
-**2. Python environment**
+**2. Python environment and tables**
 
 ```powershell
-cd D:\Intern\databox\backend
+cd backend
 copy .env.example .env
 py -3.12 -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.txt
-```
-
-If `py -3.12` is missing, use the Python 3.12 interpreter you already have.
-
-**3. Create the tables**
-
-```powershell
-cd D:\Intern\databox\backend
 $env:PYTHONPATH = "."
 .\.venv\Scripts\python -m alembic upgrade head
 ```
 
-On first API start, development mode creates one owner when the user table is empty:
+If `py -3.12` is missing, use the Python 3.12 interpreter you already have. On macOS or Linux, create the virtualenv with `python3.12 -m venv .venv` and call `./.venv/bin/python` instead of `.\.venv\Scripts\python`.
 
-- email: `owner@localhost`
-- password: `local-test-password`
+`backend/.env` is loaded by the API and the collaboration process. `alembic upgrade head` creates the tables. Run it again after pulling a change that adds a migration.
 
-Change `DATABOX_BOOTSTRAP_EMAIL` and `DATABOX_BOOTSTRAP_PASSWORD` in `backend/.env` before that first start if you want different values. The password must be at least 12 characters. Those bootstrap variables must be unset in production.
+**3. API**
 
-**4. API and website**
+Leave this running.
 
 ```powershell
-cd D:\Intern\databox\backend
+cd backend
 $env:PYTHONPATH = "."
-.\.venv\Scripts\python -m uvicorn app.main:app --reload --port 8010
+.\.venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Open http://127.0.0.1:8010 and sign in. Upload a real PDF (`%PDF-` at the start, `%%EOF` at the end, no `/JavaScript`, `/Launch`, or `/EmbeddedFile`).
+**4. Collaboration**
 
-**5. Page images**
-
-The API does not rasterize PDFs. In another window:
+Leave this running in a second terminal. Editing stays disconnected without it.
 
 ```powershell
-cd D:\Intern\databox\backend
+cd backend
+$env:PYTHONPATH = "."
+.\.venv\Scripts\python -m uvicorn app.collab_main:app --host 127.0.0.1 --port 8001
+```
+
+**5. Page renderer**
+
+Leave this running in a third terminal. `backend/.env.example` sets `DATABOX_RENDER_QUEUE=celery`, so the API sends picture jobs to this worker. A view link shows "Page is still rendering" until the worker finishes; open the page again after that.
+
+```powershell
+cd backend
 $env:PYTHONPATH = "."
 .\.venv\Scripts\celery -A app.worker.celery_app worker --pool=solo --loglevel=INFO -Q databox_render
 ```
 
-**View page** returns "Page is still rendering" until that worker finishes. Click it again after the worker logs the task.
+**6. Website**
+
+Leave this running in a fourth terminal.
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Open http://localhost:5173 and sign in.
+
+The website proxies `/api` to `http://127.0.0.1:8000` and collaboration sockets to `http://127.0.0.1:8001`. Do not open port 8000 in the browser for the workspace.
+
+### First sign-in
+
+The first API start, when the user table is empty, creates one owner:
+
+- email: `owner@localhost`
+- password: `local-test-password`
+
+Change `DATABOX_BOOTSTRAP_EMAIL` and `DATABOX_BOOTSTRAP_PASSWORD` in `backend/.env` before that first start if you want different values. The password must be at least 12 characters. Unset `DATABOX_BOOTSTRAP_PASSWORD` in production.
+
+After that, use **Create an organization** for a new organization or **Join an organization** with an organization id from someone who is already in it. Then choose **New document**, mark it public or leave it private, and share it with another person's user id.
+
+### What should be listening
+
+| Process | Address |
+| --- | --- |
+| Website | http://localhost:5173 |
+| API | http://127.0.0.1:8000 |
+| Collaboration | http://127.0.0.1:8001 |
+| Postgres | `127.0.0.1:5434` |
+| Redis | `127.0.0.1:6380` |
+
+## Run everything in Docker
+
+This builds the API, collaboration process, render worker, and website. It does not use `backend/.env`. Do not also start the local API or website, because both want ports 8000 and 5173.
+
+```powershell
+docker compose up --build -d
+```
+
+Open http://localhost:5173. The first owner inside that stack is still `owner@localhost` / `local-test-password`. Page rendering goes to the compose render worker over HTTP, not to the Celery command above.
+
+Stop it with `docker compose down`. That keeps the database volume. `docker compose down -v` deletes the database volume and the stored files.
 
 ## Tests that do not need Docker
 
 ```powershell
-cd D:\Intern\databox\backend
+cd backend
 $env:PYTHONPATH = "."
 .\.venv\Scripts\python -m pytest tests/test_databox.py
 ```
