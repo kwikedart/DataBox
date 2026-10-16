@@ -47,17 +47,57 @@ export function LoginPage({
   const creating = mode !== "sign-in";
 
   return (
-    <main>
-      <h1>DataBox</h1>
-      <p className="hint">
-        {mode === "create"
-          ? "This account starts a new organization. Share the organization id with the people who should join it."
-          : mode === "join"
-            ? "Join an organization with the id its owner gives you. You join as a member."
-            : hint}
-      </p>
-      {error ? <p className="error">{error}</p> : null}
-      <form onSubmit={submit}>
+    <main className="screen auth-screen">
+      <section className="auth-copy">
+        <p className="mark">DataBox</p>
+        <h1>Documents stay inside the organization.</h1>
+        <p className="hint">
+          {mode === "create"
+            ? "This account starts a new organization. Share the organization id with the people who should join it."
+            : mode === "join"
+              ? "Join an organization with the id its owner gives you. You join as a member."
+              : hint}
+        </p>
+      </section>
+      <form className="panel" onSubmit={submit}>
+        <div className="segment" role="group" aria-label="Account action">
+          <button
+            type="button"
+            className={mode === "sign-in" ? "selected" : "secondary"}
+            onClick={() => {
+              setMode("sign-in");
+              setError("");
+              setPassword("");
+            }}
+          >
+            Sign in
+          </button>
+          <button
+            type="button"
+            className={mode === "create" ? "selected" : "secondary"}
+            onClick={() => {
+              setMode("create");
+              setError("");
+              setPassword("");
+              setEmail("");
+            }}
+          >
+            Create
+          </button>
+          <button
+            type="button"
+            className={mode === "join" ? "selected" : "secondary"}
+            onClick={() => {
+              setMode("join");
+              setError("");
+              setPassword("");
+              setEmail("");
+            }}
+          >
+            Join
+          </button>
+        </div>
+        {error ? <p className="error">{error}</p> : null}
         <label>
           Email
           <input type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required />
@@ -87,21 +127,6 @@ export function LoginPage({
         ) : null}
         {creating ? <p className="hint">Use at least 12 characters.</p> : null}
         <button type="submit">{mode === "create" ? "Create organization" : mode === "join" ? "Join organization" : "Sign in"}</button>
-        {mode !== "create" ? (
-          <button type="button" className="secondary" onClick={() => { setMode("create"); setError(""); setPassword(""); setEmail(""); }}>
-            Create an organization
-          </button>
-        ) : null}
-        {mode !== "join" ? (
-          <button type="button" className="secondary" onClick={() => { setMode("join"); setError(""); setPassword(""); setEmail(""); }}>
-            Join an organization
-          </button>
-        ) : null}
-        {mode !== "sign-in" ? (
-          <button type="button" className="secondary" onClick={() => { setMode("sign-in"); setError(""); setPassword(""); }}>
-            Sign in instead
-          </button>
-        ) : null}
       </form>
     </main>
   );

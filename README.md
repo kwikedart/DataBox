@@ -234,7 +234,15 @@ docker compose --env-file .env.production -f docker-compose.prod.yml up --build 
 
 Open `https://your-domain`. There is no pre-made owner on this stack. Use **Create an organization** and a password of at least 12 characters. Give the organization id on the workspace to anyone who should join.
 
-Document bytes are stored in a private Docker volume at `/var/lib/databox/objects` inside the containers. That mode is `DATABOX_STORAGE=volume`. It is for this single server. A deployment that spreads the API and the renderer across more than one machine should use `DATABOX_STORAGE=gcs` and a private bucket instead.
+Document bytes are stored in a private Docker volume at `/var/lib/databox/objects` inside the containers. That mode is `DATABOX_STORAGE=volume`. It is for this single server. To use a private Cloud Storage bucket instead, create the bucket with uniform access and public access prevention, then generate the env file with the bucket name:
+
+```sh
+DATABOX_DOMAIN=databox.example.com DATABOX_GCS_BUCKET=sanctum-vm433848-data sh deploy/prepare-env.sh
+```
+
+`deploy/sanctum-bootstrap.sh` creates that bucket and an e2-micro VM in `asia-south1` for project sanctum. Run it in Cloud Shell. It does not enable APIs, change IAM, or open the database to the internet. The containers use the VM service account. Do not make the bucket public, and do not commit a service-account key. If a command says an API must be enabled, stop and ask the project owner.
+
+Sign-in stays in this app. In the Firebase console, add the existing project sanctum and one Web app. Do not create a second Google Cloud project.
 
 Watch the logs with:
 

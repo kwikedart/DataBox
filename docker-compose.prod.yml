@@ -1,3 +1,9 @@
+# The GCS client uses the Compute Engine service account through the metadata host.
+# No service-account key is mounted into the containers.
+x-gce: &gce
+  extra_hosts:
+    - "metadata.google.internal:169.254.169.254"
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -27,6 +33,7 @@ services:
     restart: unless-stopped
 
   api:
+    <<: *gce
     build: ./backend
     env_file: .env.production
     environment:
@@ -44,6 +51,7 @@ services:
     restart: unless-stopped
 
   collab:
+    <<: *gce
     build: ./backend
     env_file: .env.production
     environment:
@@ -60,6 +68,7 @@ services:
     restart: unless-stopped
 
   render-worker:
+    <<: *gce
     build: ./backend
     env_file: .env.production
     environment:

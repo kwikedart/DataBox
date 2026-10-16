@@ -76,73 +76,86 @@ export function WorkspacePage({ session, onSignOut }: { session: Session; onSign
   }
 
   return (
-    <main>
-      <h1>DataBox</h1>
-      <p className="hint">
-        Signed in as {session.email} ({session.role})
-      </p>
-      <label>
-        Your user id
-        <input readOnly value={session.userId} aria-label="Your user id" />
-      </label>
-      <label>
-        Organization id
-        <input readOnly value={session.organizationId} aria-label="Organization id" />
-      </label>
-      <p className="hint">People join this organization with that id. Share a document with a user id, or tag it with their label.</p>
-      {error ? <p className="error">{error}</p> : null}
-      <form onSubmit={(event) => void createDocument(event)}>
-        <label>
-          New document
-          <input value={title} maxLength={255} onChange={(event) => setTitle(event.target.value)} />
-        </label>
-        <button type="submit" disabled={!title.trim()}>
-          Create document
-        </button>
-      </form>
-      <section>
-        <ul>
-          {documents.length === 0 ? <li>No secure documents yet.</li> : null}
-          {documents.map((document) => (
-            <li key={document.documentId}>
-              <Link to={`/documents/${document.documentId}`}>{document.title}</Link>
-              {document.visibility === "private" ? " (private)" : " (public)"}
-              {document.canOpen === false ? (
-                document.pendingRequest ? (
-                  <p className="hint">Asked for {document.pendingRequest === "editor" ? "edit" : "view"} access</p>
-                ) : (
-                  <>
-                    <button type="button" className="secondary" onClick={() => void requestAccess(document.documentId, "viewer")}>
-                      Ask to view
-                    </button>
-                    <button type="button" className="secondary" onClick={() => void requestAccess(document.documentId, "editor")}>
-                      Ask to edit
-                    </button>
-                  </>
-                )
-              ) : null}
-            </li>
-          ))}
-        </ul>
-        {canManage ? (
-          <form onSubmit={(event) => void saveMyLabels(event)}>
-            <label>
-              My labels
-              <input
-                value={myLabels}
-                aria-label="My labels"
-                placeholder="finance, legal"
-                onChange={(event) => setMyLabels(event.target.value)}
-              />
-            </label>
-            <p className="hint">A public document opens for people who have one of these labels, and stays closed for people who have a blocked label.</p>
-            <button type="submit">Save my labels</button>
-          </form>
-        ) : null}
+    <main className="screen">
+      <header className="topbar">
+        <div>
+          <p className="mark">DataBox</p>
+          <h1>Workspace</h1>
+          <p className="hint">
+            Signed in as {session.email} ({session.role})
+          </p>
+        </div>
         <button type="button" className="secondary" onClick={onSignOut}>
           Sign out
         </button>
-      </section>
+      </header>
+      {error ? <p className="error">{error}</p> : null}
+      <div className="split">
+        <aside className="panel">
+          <h2>This organization</h2>
+          <label>
+            Your user id
+            <input readOnly value={session.userId} aria-label="Your user id" />
+          </label>
+          <label>
+            Organization id
+            <input readOnly value={session.organizationId} aria-label="Organization id" />
+          </label>
+          <p className="hint">People join this organization with that id. Share a document with a user id, or tag it with their label.</p>
+          {canManage ? (
+            <form onSubmit={(event) => void saveMyLabels(event)}>
+              <label>
+                My labels
+                <input
+                  value={myLabels}
+                  aria-label="My labels"
+                  placeholder="finance, legal"
+                  onChange={(event) => setMyLabels(event.target.value)}
+                />
+              </label>
+              <p className="hint">A public document opens for people who have one of these labels, and stays closed for people who have a blocked label.</p>
+              <button type="submit">Save my labels</button>
+            </form>
+          ) : null}
+        </aside>
+        <div className="stack">
+          <form className="panel" onSubmit={(event) => void createDocument(event)}>
+            <label>
+              New document
+              <input value={title} maxLength={255} onChange={(event) => setTitle(event.target.value)} />
+            </label>
+            <button type="submit" disabled={!title.trim()}>
+              Create document
+            </button>
+          </form>
+          <section className="panel">
+            <h2>Documents</h2>
+            <ul className="doc-list">
+              {documents.length === 0 ? <li>No secure documents yet.</li> : null}
+              {documents.map((document) => (
+                <li key={document.documentId}>
+                  <Link to={`/documents/${document.documentId}`}>{document.title}</Link>
+                  <span className="pill">{document.visibility === "private" ? "Private" : "Public"}</span>
+                  {document.canOpen === false ? (
+                    document.pendingRequest ? (
+                      <p className="hint">Asked for {document.pendingRequest === "editor" ? "edit" : "view"} access</p>
+                    ) : (
+                      <span className="actions">
+                        <button type="button" className="secondary" onClick={() => void requestAccess(document.documentId, "viewer")}>
+                          Ask to view
+                        </button>
+                        <button type="button" className="secondary" onClick={() => void requestAccess(document.documentId, "editor")}>
+                          Ask to edit
+                        </button>
+                      </span>
+                    )
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+      </div>
     </main>
   );
 }

@@ -97,20 +97,27 @@ export function SharePage({ session }: { session: Session }) {
     expiry && !Number.isNaN(expiry.getTime()) ? `This link expires ${expiry.toLocaleString()}.` : "";
 
   return (
-    <main>
-      <h1>{title}</h1>
-      <p className="hint">
-        Signed in as {session.email}. {expiryText}{" "}
-        {editor ? status || "Opening the shared document" : "This link shows a picture of the document and cannot edit it."}
-      </p>
+    <main className="screen share-screen">
+      <header className="topbar">
+        <div>
+          <p className="mark">DataBox</p>
+          <h1>{title}</h1>
+          <p className="hint">
+            Signed in as {session.email}. {expiryText}{" "}
+            {editor ? status || "Opening the shared document" : "This link shows a picture of the document and cannot edit it."}
+          </p>
+        </div>
+      </header>
       {error ? <p className="error">{error}</p> : null}
-      {editor ? (
-        <>
-          <p className="muted">Present: {presence.map((person) => person.name).join(", ") || "nobody else"}</p>
-          {ready ? <CollaborativeText doc={editor.doc} canEdit={canEdit} /> : <p className="hint">Opening the shared editor</p>}
-        </>
-      ) : null}
-      {pageUrl ? <img className="page" alt="Shared document page" src={pageUrl} /> : null}
+      <section className="panel">
+        {editor ? (
+          <>
+            <p className="muted">Present: {presence.map((person) => person.name).join(", ") || "nobody else"}</p>
+            {ready ? <CollaborativeText doc={editor.doc} canEdit={canEdit} /> : <p className="hint">Opening the shared editor</p>}
+          </>
+        ) : null}
+        {pageUrl ? <img className="page" alt="Shared document page" src={pageUrl} /> : null}
+      </section>
     </main>
   );
 }

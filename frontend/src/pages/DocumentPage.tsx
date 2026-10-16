@@ -375,218 +375,229 @@ export function DocumentPage({ session }: { session: Session }) {
   const locked = documentRow?.canOpen === false;
 
   return (
-    <main>
-      <h1>{documentRow?.title ?? "Document"}</h1>
-      <p className="hint">
-        <Link to="/">Workspace</Link>
-      </p>
+    <main className="screen document-screen">
+      <header className="topbar">
+        <div>
+          <p className="mark">
+            <Link to="/">DataBox</Link>
+          </p>
+          <h1>{documentRow?.title ?? "Document"}</h1>
+        </div>
+      </header>
       {error ? <p className="error">{error}</p> : null}
       {locked ? (
-        <section>
+        <section className="panel">
           <p>This public document is visible to your organization. It opens when it is shared with you or tagged with one of your labels.</p>
           {documentRow?.pendingRequest ? (
             <p className="hint">Asked for {documentRow.pendingRequest === "editor" ? "edit" : "view"} access</p>
           ) : (
-            <>
+            <span className="actions">
               <button type="button" onClick={() => void requestAccess("viewer")}>Ask to view</button>
               <button type="button" className="secondary" onClick={() => void requestAccess("editor")}>Ask to edit</button>
-            </>
+            </span>
           )}
         </section>
-      ) : null}
-      {locked ? null : (
-      <section>
-        {textDocument ? (
-          <button type="button" onClick={() => void saveVersion()} disabled={saving || !documentRow?.currentVersionId}>
-            {saving ? "Saving" : "Save version"}
-          </button>
-        ) : (
-          <button type="button" onClick={() => void viewPage()}>
-            View page
-          </button>
-        )}
-        {textDocument ? null : (
-          <button type="button" className="secondary" onClick={collaborate}>
-            Collaborate
-          </button>
-        )}
-        {canManage ? (
-          <label>
-            Link lifetime in hours
-            <input
-              type="number"
-              min={1}
-              max={168}
-              value={linkHours}
-              aria-label="Link lifetime in hours"
-              onChange={(event) => setLinkHours(event.target.value)}
-            />
-          </label>
-        ) : null}
-        {currentEdit ? (
-          <>
-            <label>
-              Edit link
-              <input readOnly value={shareUrl(currentEdit.token)} aria-label="Edit link" />
-            </label>
-            <p className="hint">{expiryLabel(currentEdit.expiresAt)}</p>
+      ) : (
+        <div className="split document-split">
+          <section className="panel editor-panel">
+            <div className="actions">
+              {textDocument ? (
+                <button type="button" onClick={() => void saveVersion()} disabled={saving || !documentRow?.currentVersionId}>
+                  {saving ? "Saving" : "Save version"}
+                </button>
+              ) : (
+                <button type="button" onClick={() => void viewPage()}>
+                  View page
+                </button>
+              )}
+              {textDocument ? null : (
+                <button type="button" className="secondary" onClick={collaborate}>
+                  Collaborate
+                </button>
+              )}
+            </div>
+            <p>{status}</p>
+            <p className="muted">Present: {presence.map((person) => person.name).join(", ") || "nobody else"}</p>
+            {textDocument && editor && ready ? <CollaborativeText doc={editor.doc} canEdit={canEdit} /> : null}
+            {textDocument && editor && !ready ? <p className="hint">Opening the shared editor</p> : null}
+            {pageUrl ? <img className="page" alt="Document page" src={pageUrl} /> : null}
+            {textDocument ? null : (
+              <>
+                {annotations
+                  .filter((item) => item.page === 1)
+                  .map((item) => (
+                    <p className="note" key={item.id}>
+                      {item.text}
+                    </p>
+                  ))}
+                <label>
+                  Annotation note
+                  <textarea value={note} rows={3} disabled={!canEdit} onChange={(event) => setNote(event.target.value)} />
+                </label>
+                <button
+                  type="button"
+                  disabled={!canEdit}
+                  onClick={() => {
+                    editor?.addNote(1, note);
+                    setNote("");
+                  }}
+                >
+                  Add annotation
+                </button>
+              </>
+            )}
+          </section>
+          <aside className="panel share-panel">
+            <h2>Access</h2>
             {canManage ? (
-              <button type="button" className="secondary" onClick={() => void setLinkLifetime(currentEdit.versionId, "editor")}>
-                Set edit link expiry
-              </button>
+              <label>
+                Link lifetime in hours
+                <input
+                  type="number"
+                  min={1}
+                  max={168}
+                  value={linkHours}
+                  aria-label="Link lifetime in hours"
+                  onChange={(event) => setLinkHours(event.target.value)}
+                />
+              </label>
             ) : null}
-          </>
-        ) : null}
-        {currentView ? (
-          <>
-            <label>
-              View link
-              <input readOnly value={shareUrl(currentView.token)} aria-label="View link" />
-            </label>
-            <p className="hint">{expiryLabel(currentView.expiresAt)}</p>
-            {canManage ? (
-              <button type="button" className="secondary" onClick={() => void setLinkLifetime(currentView.versionId, "viewer")}>
-                Set view link expiry
-              </button>
-            ) : null}
-          </>
-        ) : null}
-        <p>{status}</p>
-        <p className="muted">Present: {presence.map((person) => person.name).join(", ") || "nobody else"}</p>
-        {textDocument && editor && ready ? <CollaborativeText doc={editor.doc} canEdit={canEdit} /> : null}
-        {textDocument && editor && !ready ? <p className="hint">Opening the shared editor</p> : null}
-        {pageUrl ? <img className="page" alt="Document page" src={pageUrl} /> : null}
-        {locked || !canShare ? null : (
-          <>
-            <p className="hint">This document is {documentRow?.visibility === "public" ? "public" : "private"}.</p>
-            <button type="button" className="secondary" onClick={() => void setVisibility("public")}>Make public</button>
-            <button type="button" className="secondary" onClick={() => void setVisibility("private")}>Make private</button>
-            {requests.map((request) => (
-              <p key={request.requestId}>
-                {request.userId} asked to {request.role === "editor" ? "edit" : "view"}
-                <button type="button" onClick={() => void decideRequest(request.requestId, true)}>Allow</button>
-                <button type="button" className="secondary" onClick={() => void decideRequest(request.requestId, false)}>Deny</button>
-              </p>
-            ))}
-          </>
-        )}
-        {!canShare ? null : (
-          <>
-            <label>
-              Share with user id
-              <input
-                value={personId}
-                aria-label="Share with user id"
-                placeholder="User id"
-                onChange={(event) => setPersonId(event.target.value)}
-              />
-            </label>
-            <label>
-              Access for this user
-              <select aria-label="Access for this user" value={personRole} onChange={(event) => setPersonRole(event.target.value)}>
-                <option value="viewer">View</option>
-                <option value="editor">Edit</option>
-              </select>
-            </label>
-            <button type="button" className="secondary" onClick={() => void shareWithUser()} disabled={!personId.trim()}>
-              Share with this user
-            </button>
-            <p className="hint">
-              This share does not expire. The person signs in with that user id. A blocked label still keeps them out, and the access cannot exceed their organization role.
-            </p>
-            <ul>
-              {people.map((person) => (
-                <li key={person.userId}>
-                  {person.userId} ({person.role === "editor" ? "edit" : "view"})
-                  <button type="button" className="secondary" onClick={() => void removePerson(person.userId)}>
-                    Remove
+            {currentEdit ? (
+              <>
+                <label>
+                  Edit link
+                  <input readOnly value={shareUrl(currentEdit.token)} aria-label="Edit link" />
+                </label>
+                <p className="hint">{expiryLabel(currentEdit.expiresAt)}</p>
+                {canManage ? (
+                  <button type="button" className="secondary" onClick={() => void setLinkLifetime(currentEdit.versionId, "editor")}>
+                    Set edit link expiry
                   </button>
-                </li>
-              ))}
-            </ul>
-            <label>
-              Always opened by
-              <input
-                value={audience}
-                aria-label="Audience labels"
-                placeholder="finance, legal"
-                onChange={(event) => setAudience(event.target.value)}
-              />
-            </label>
-            <p className="hint">People with one of these labels can open this public document. A private document still opens only for the people you share it with.</p>
-            <label>
-              Blocked for
-              <input
-                value={restricted}
-                aria-label="Restricted labels"
-                placeholder="contractor"
-                onChange={(event) => setRestricted(event.target.value)}
-              />
-            </label>
-            <p className="hint">People with one of these labels cannot open this document.</p>
-            <button type="button" className="secondary" onClick={() => void saveLabels()}>
-              Save document labels
-            </button>
-          </>
-        )}
-        {textDocument ? null : (
-          <>
-            {annotations
-              .filter((item) => item.page === 1)
-              .map((item) => (
-                <p className="note" key={item.id}>
-                  {item.text}
-                </p>
-              ))}
-            <label>
-              Annotation note
-              <textarea value={note} rows={3} disabled={!canEdit} onChange={(event) => setNote(event.target.value)} />
-            </label>
-            <button
-              type="button"
-              disabled={!canEdit}
-              onClick={() => {
-                editor?.addNote(1, note);
-                setNote("");
-              }}
-            >
-              Add annotation
-            </button>
-          </>
-        )}
-        <ul>
-          {versions.map((version) => {
-            const view = links.find((link) => link.versionId === version.id && link.permission === "viewer");
-            const current = version.id === documentRow?.currentVersionId;
-            return (
-              <li key={version.id}>
-                Version {version.versionNumber}
-                {current ? " (current)" : ""}
-                {view && !current ? (
-                  <>
-                    <input readOnly value={shareUrl(view.token)} aria-label={`Version ${version.versionNumber} view link`} />
-                    <p className="hint">{expiryLabel(view.expiresAt)}</p>
-                    {canManage ? (
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => void setLinkLifetime(view.versionId, "viewer")}
-                      >
-                        Set this link expiry
-                      </button>
-                    ) : null}
-                  </>
                 ) : null}
-                {textDocument ? null : (
-                  <button type="button" className="secondary" onClick={() => void restore(version.id)}>
-                    Restore
+              </>
+            ) : null}
+            {currentView ? (
+              <>
+                <label>
+                  View link
+                  <input readOnly value={shareUrl(currentView.token)} aria-label="View link" />
+                </label>
+                <p className="hint">{expiryLabel(currentView.expiresAt)}</p>
+                {canManage ? (
+                  <button type="button" className="secondary" onClick={() => void setLinkLifetime(currentView.versionId, "viewer")}>
+                    Set view link expiry
                   </button>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      </section>
+                ) : null}
+              </>
+            ) : null}
+            {canShare ? (
+              <>
+                <p className="hint">This document is {documentRow?.visibility === "public" ? "public" : "private"}.</p>
+                <span className="actions">
+                  <button type="button" className="secondary" onClick={() => void setVisibility("public")}>Make public</button>
+                  <button type="button" className="secondary" onClick={() => void setVisibility("private")}>Make private</button>
+                </span>
+                {requests.map((request) => (
+                  <p key={request.requestId}>
+                    {request.userId} asked to {request.role === "editor" ? "edit" : "view"}
+                    <span className="actions">
+                      <button type="button" onClick={() => void decideRequest(request.requestId, true)}>Allow</button>
+                      <button type="button" className="secondary" onClick={() => void decideRequest(request.requestId, false)}>Deny</button>
+                    </span>
+                  </p>
+                ))}
+                <label>
+                  Share with user id
+                  <input
+                    value={personId}
+                    aria-label="Share with user id"
+                    placeholder="User id"
+                    onChange={(event) => setPersonId(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Access for this user
+                  <select aria-label="Access for this user" value={personRole} onChange={(event) => setPersonRole(event.target.value)}>
+                    <option value="viewer">View</option>
+                    <option value="editor">Edit</option>
+                  </select>
+                </label>
+                <button type="button" className="secondary" onClick={() => void shareWithUser()} disabled={!personId.trim()}>
+                  Share with this user
+                </button>
+                <p className="hint">
+                  This share does not expire. The person signs in with that user id. A blocked label still keeps them out, and the access cannot exceed their organization role.
+                </p>
+                <ul>
+                  {people.map((person) => (
+                    <li key={person.userId}>
+                      {person.userId} ({person.role === "editor" ? "edit" : "view"})
+                      <button type="button" className="secondary" onClick={() => void removePerson(person.userId)}>
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <label>
+                  Always opened by
+                  <input
+                    value={audience}
+                    aria-label="Audience labels"
+                    placeholder="finance, legal"
+                    onChange={(event) => setAudience(event.target.value)}
+                  />
+                </label>
+                <p className="hint">People with one of these labels can open this public document. A private document still opens only for the people you share it with.</p>
+                <label>
+                  Blocked for
+                  <input
+                    value={restricted}
+                    aria-label="Restricted labels"
+                    placeholder="contractor"
+                    onChange={(event) => setRestricted(event.target.value)}
+                  />
+                </label>
+                <p className="hint">People with one of these labels cannot open this document.</p>
+                <button type="button" className="secondary" onClick={() => void saveLabels()}>
+                  Save document labels
+                </button>
+              </>
+            ) : null}
+            <h2>Versions</h2>
+            <ul>
+              {versions.map((version) => {
+                const view = links.find((link) => link.versionId === version.id && link.permission === "viewer");
+                const current = version.id === documentRow?.currentVersionId;
+                return (
+                  <li key={version.id}>
+                    Version {version.versionNumber}
+                    {current ? " (current)" : ""}
+                    {view && !current ? (
+                      <>
+                        <input readOnly value={shareUrl(view.token)} aria-label={`Version ${version.versionNumber} view link`} />
+                        <p className="hint">{expiryLabel(view.expiresAt)}</p>
+                        {canManage ? (
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => void setLinkLifetime(view.versionId, "viewer")}
+                          >
+                            Set this link expiry
+                          </button>
+                        ) : null}
+                      </>
+                    ) : null}
+                    {textDocument ? null : (
+                      <button type="button" className="secondary" onClick={() => void restore(version.id)}>
+                        Restore
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </aside>
+        </div>
       )}
     </main>
   );

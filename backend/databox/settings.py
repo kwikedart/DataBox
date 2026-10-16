@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
+
+_BUCKET_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +54,6 @@ def load_databox_settings() -> DataboxSettings:
         pepper = "dev-databox-pepper"
     if not secret:
         secret = "dev-databox-view-secret"
-    bucket = os.environ.get("DATABOX_GCS_BUCKET") or os.environ.get("GCS_BUCKET_NAME") or "databox-private"
     return DataboxSettings(
         token_pepper=pepper,
         view_token_secret=secret,
@@ -61,5 +63,15 @@ def load_databox_settings() -> DataboxSettings:
         share_max_ttl_seconds=_int("DATABOX_SHARE_MAX_TTL_SECONDS", 7 * 24 * 3600),
         view_token_ttl_seconds=min(_int("DATABOX_VIEW_TOKEN_TTL_SECONDS", 15 * 60), 30 * 60),
         allow_guest_edit=_flag("DATABOX_ALLOW_GUEST_EDIT"),
-        bucket_name=bucket,
+        bucket_name=_bucket_name(environment),
     )
+
+
+def _bucket_name(environment: str) -> str:
+    explicit = (os.environ.get("DATABOX_GCS_BUCKET") or os.environ.get("GCS_BUCKET_NAME") or "").strip()
+    storage = os.environ.get("DATABOX_STORAGE", "local").strip().lower()
+    if environment in {"production", "prod"} and storage == "gcs" and not explicit:
+        raise RuntimeError("DATABOX_GCS_BUCKET is required when DATABOX_STORAGE=gcs in production")
+    if explicit and _BUCKET_NAME.fullmatch(explicit) is None:
+        raise RuntimeError("DATABOX_GCS_BUCKET must be a GCS bucket name, not a URL")
+    return explicit or "databox-private"

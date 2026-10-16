@@ -20,6 +20,18 @@ case "$DATABOX_DOMAIN" in
     ;;
 esac
 
+if [ -n "${DATABOX_GCS_BUCKET:-}" ]; then
+  printf '%s\n' "$DATABOX_GCS_BUCKET" | grep -Eq '^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$' || {
+    echo "DATABOX_GCS_BUCKET must be the bucket name only, for example sanctum-vm433848-data." >&2
+    exit 1
+  }
+  storage_lines="DATABOX_STORAGE=gcs
+DATABOX_GCS_BUCKET=${DATABOX_GCS_BUCKET}"
+else
+  storage_lines="DATABOX_STORAGE=volume
+DATABOX_LOCAL_DIR=/var/lib/databox/objects"
+fi
+
 secret() {
   openssl rand -hex 32
 }
@@ -38,8 +50,7 @@ POSTGRES_HOST=postgres
 POSTGRES_PORT=5432
 DATABOX_REDIS_PASSWORD=${redis_password}
 DATABOX_REDIS_URL=redis://:${redis_password}@redis:6379/0
-DATABOX_STORAGE=volume
-DATABOX_LOCAL_DIR=/var/lib/databox/objects
+${storage_lines}
 DATABOX_RENDER_QUEUE=http
 DATABOX_RENDER_URL=http://render-worker:8091/internal/tasks/render
 DATABOX_TASK_SECRET=$(secret)
