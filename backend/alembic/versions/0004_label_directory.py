@@ -2,7 +2,7 @@
 
 Revision ID: 0004_label_directory
 Revises: 0003_document_visibility
-Create Date: 2026-10-17 05:00:00.000000
+Create Date: 2026-10-17 05:00:00.000000 
 """
 
 from typing import Sequence, Union
