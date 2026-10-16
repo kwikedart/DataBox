@@ -214,6 +214,34 @@ a:focus-visible {
   color: var(--muted);
 }
 
+.label-directory form button {
+  margin: 0 8px 8px 0;
+}
+
+.label-directory h3 {
+  margin: 16px 0 8px;
+  font-size: 0.95rem;
+}
+
+.label-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.label-list li,
+.holder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.uid {
+  word-break: break-all;
+}
+
 img.page {
   max-width: 100%;
   border: 1px solid var(--line);

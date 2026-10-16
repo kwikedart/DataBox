@@ -15,6 +15,8 @@ from databox.infrastructure.rows import (
     DataboxDocumentPermissionRow,
     DataboxDocumentRow,
     DataboxDocumentVersionRow,
+    DataboxLabelAssignmentRow,
+    DataboxLabelRow,
     DataboxMembershipAttributeRow,
     DataboxShareLinkRow,
     MembershipRow,
@@ -29,7 +31,9 @@ from databox.domain.entities import (
     DocumentLink,
     DocumentPermission,
     DocumentVersion,
+    LabelAssignment,
     MembershipAttributes,
+    OrgLabel,
     ShareLink,
     UploadOperation,
 )
@@ -54,6 +58,28 @@ def _document(row: DataboxDocumentRow) -> Document:
         created_at=row.created_at,
         updated_at=row.updated_at,
         deleted_at=row.deleted_at,
+    )
+
+
+def _org_label(row: DataboxLabelRow) -> OrgLabel:
+    return OrgLabel(
+        id=row.id,
+        organization_id=row.organization_id,
+        name=row.name,
+        tag=row.tag,
+        created_by=row.created_by,
+        created_at=row.created_at,
+    )
+
+
+def _label_assignment(row: DataboxLabelAssignmentRow) -> LabelAssignment:
+    return LabelAssignment(
+        id=row.id,
+        organization_id=row.organization_id,
+        label_id=row.label_id,
+        user_id=row.user_id,
+        assigned_by=row.assigned_by,
+        created_at=row.created_at,
     )
 
 
@@ -338,9 +364,19 @@ class SqlAlchemyDataboxStore:
                 DataboxMembershipAttributeRow.user_id == user_id,
             )
         )
-        if row is None:
-            return frozenset()
-        return frozenset(row.labels or ())
+        names = set(row.labels or ()) if row is not None else set()
+        assigned = (
+            await self.session.scalars(
+                select(DataboxLabelRow.name)
+                .join(DataboxLabelAssignmentRow, DataboxLabelAssignmentRow.label_id == DataboxLabelRow.id)
+                .where(
+                    DataboxLabelAssignmentRow.organization_id == organization_id,
+                    DataboxLabelAssignmentRow.user_id == user_id,
+                )
+            )
+        ).all()
+        names.update(assigned)
+        return frozenset(names)
 
     async def save_attributes(self, attributes: MembershipAttributes) -> None:
         row = await self.session.scalar(
@@ -360,6 +396,117 @@ class SqlAlchemyDataboxStore:
             )
         else:
             row.labels = list(attributes.labels)
+        await self.session.flush()
+
+    async def list_labels(self, organization_id: UUID) -> list[OrgLabel]:
+        rows = (
+            await self.session.scalars(
+                select(DataboxLabelRow).where(DataboxLabelRow.organization_id == organization_id)
+            )
+        ).all()
+        return [_org_label(row) for row in rows]
+
+    async def get_label(self, organization_id: UUID, label_id: UUID) -> OrgLabel | None:
+        row = await self.session.scalar(
+            select(DataboxLabelRow).where(
+                DataboxLabelRow.organization_id == organization_id,
+                DataboxLabelRow.id == label_id,
+            )
+        )
+        return None if row is None else _org_label(row)
+
+    async def find_label_by_name(self, organization_id: UUID, name: str) -> OrgLabel | None:
+        row = await self.session.scalar(
+            select(DataboxLabelRow).where(
+                DataboxLabelRow.organization_id == organization_id,
+                DataboxLabelRow.name == name,
+            )
+        )
+        return None if row is None else _org_label(row)
+
+    async def save_label(self, label: OrgLabel) -> None:
+        row = await self.session.get(DataboxLabelRow, label.id)
+        if row is None:
+            self.session.add(
+                DataboxLabelRow(
+                    id=label.id,
+                    organization_id=label.organization_id,
+                    name=label.name,
+                    tag=label.tag,
+                    created_by=label.created_by,
+                    created_at=label.created_at,
+                )
+            )
+        else:
+            row.name = label.name
+            row.tag = label.tag
+        await self.session.flush()
+
+    async def delete_label(self, organization_id: UUID, label_id: UUID) -> None:
+        row = await self.session.scalar(
+            select(DataboxLabelRow).where(
+                DataboxLabelRow.organization_id == organization_id,
+                DataboxLabelRow.id == label_id,
+            )
+        )
+        if row is not None:
+            await self.session.delete(row)
+            await self.session.flush()
+
+    async def list_assignments(self, organization_id: UUID) -> list[LabelAssignment]:
+        rows = (
+            await self.session.scalars(
+                select(DataboxLabelAssignmentRow).where(DataboxLabelAssignmentRow.organization_id == organization_id)
+            )
+        ).all()
+        return [_label_assignment(row) for row in rows]
+
+    async def find_assignment(self, label_id: UUID, user_id: UUID) -> LabelAssignment | None:
+        row = await self.session.scalar(
+            select(DataboxLabelAssignmentRow).where(
+                DataboxLabelAssignmentRow.label_id == label_id,
+                DataboxLabelAssignmentRow.user_id == user_id,
+            )
+        )
+        return None if row is None else _label_assignment(row)
+
+    async def save_assignment(self, assignment: LabelAssignment) -> None:
+        row = await self.session.get(DataboxLabelAssignmentRow, assignment.id)
+        if row is None:
+            self.session.add(
+                DataboxLabelAssignmentRow(
+                    id=assignment.id,
+                    organization_id=assignment.organization_id,
+                    label_id=assignment.label_id,
+                    user_id=assignment.user_id,
+                    assigned_by=assignment.assigned_by,
+                    created_at=assignment.created_at,
+                )
+            )
+        await self.session.flush()
+
+    async def delete_assignment(self, organization_id: UUID, assignment_id: UUID) -> None:
+        row = await self.session.scalar(
+            select(DataboxLabelAssignmentRow).where(
+                DataboxLabelAssignmentRow.organization_id == organization_id,
+                DataboxLabelAssignmentRow.id == assignment_id,
+            )
+        )
+        if row is not None:
+            await self.session.delete(row)
+            await self.session.flush()
+
+    async def delete_user_assignments(self, organization_id: UUID, user_id: UUID) -> None:
+        rows = (
+            await self.session.scalars(
+                select(DataboxLabelAssignmentRow).where(
+                    DataboxLabelAssignmentRow.organization_id == organization_id,
+                    DataboxLabelAssignmentRow.user_id == user_id,
+                )
+            )
+        ).all()
+        for row in rows:
+            await self.session.delete(row)
         await self.session.flush()
 
     async def get_member_role(self, organization_id: UUID, user_id: UUID) -> str | None:

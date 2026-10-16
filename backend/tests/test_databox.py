@@ -262,6 +262,7 @@ async def test_share_link_is_hashed_and_label_ceiling_blocks_it() -> None:
     with pytest.raises(NotFoundError):
         await application.resolve_share(actor=blocked, token=created.url_token, caller_key="client-2")
     customer = actor("member", organization_id=owner.organization_id)
+    store.members[(owner.organization_id, customer.user_id)] = "member"
     await application.set_membership_labels(actor=owner, user_id=customer.user_id, labels=("manager",))
     allowed = await application.resolve_share(actor=customer, token=created.url_token, caller_key="customer")
     assert allowed.id == created.share_id
@@ -295,6 +296,7 @@ async def test_share_lifetime_expires_the_old_link_and_a_blocked_label_cannot_op
         await application.resolve_share(actor=owner, token=created.url_token, caller_key="old")
     await application.resolve_share(actor=owner, token=replaced.url_token, caller_key="new")
     blocked = actor("member", organization_id=owner.organization_id)
+    _store.members[(owner.organization_id, blocked.user_id)] = "member"
     await application.set_membership_labels(actor=owner, user_id=blocked.user_id, labels=("contractor",))
     await application.set_labels(
         actor=owner,
@@ -433,7 +435,6 @@ async def test_user_id_share_opens_a_labeled_document_until_it_is_removed() -> N
     store.members[(organization_id, customer.user_id)] = "member"
     store.members[(organization_id, other.user_id)] = "member"
     store.members[(organization_id, owner.user_id)] = "owner"
-    await application.set_membership_labels(actor=owner, user_id=owner.user_id, labels=("finance",))
     document = await application.create_text_document(actor=owner, title="Named notes")
     await application.set_labels(
         actor=owner,
@@ -917,3 +918,57 @@ async def test_collaboration_reloads_snapshot_and_ignores_viewer_frames() -> Non
     )
     restored = await application.load_collaboration_document(editor_session)
     assert dict(restored.get("annotations", type=Map)) == {"note": "kept"}
+
+
+@pytest.mark.asyncio
+async def test_any_member_can_assign_a_tagged_label_but_not_to_themselves() -> None:
+    application, store, _storage = build()
+    organization_id = uuid4()
+    owner = actor("owner", organization_id=organization_id)
+    member = actor("member", organization_id=organization_id)
+    colleague = actor("member", organization_id=organization_id)
+    outsider = actor("member")
+    for person, role in ((owner, "owner"), (member, "member"), (colleague, "member")):
+        store.members[(organization_id, person.user_id)] = role
+    sales = await application.create_org_label(actor=member, name="Sales", tag="Sales")
+    assert (sales.name, sales.tag, sales.created_by) == ("sales", "sales", member.user_id)
+    with pytest.raises(ValidationError):
+        await application.create_org_label(actor=colleague, name="sales", tag="dev")
+    with pytest.raises(ValidationError):
+        await application.create_org_label(actor=member, name="west team", tag="sales")
+    with pytest.raises(ValidationError):
+        await application.assign_label(actor=member, label_id=sales.id, user_id=member.user_id)
+    with pytest.raises(ValidationError):
+        await application.assign_label(actor=member, label_id=sales.id, user_id=outsider.user_id)
+    assignment = await application.assign_label(actor=member, label_id=sales.id, user_id=colleague.user_id)
+    assert assignment.assigned_by == member.user_id
+    again = await application.assign_label(actor=owner, label_id=sales.id, user_id=colleague.user_id)
+    assert again.id == assignment.id
+    directory = await application.label_directory(actor=colleague)
+    assert [(row.label.name, row.label.tag, row.assigned_by) for row in directory.received] == [
+        ("sales", "sales", member.user_id)
+    ]
+    assert directory.created == ()
+    created = await application.label_directory(actor=member)
+    assert created.created[0].label.id == sales.id
+    assert [(holder.user_id, holder.assigned_by) for holder in created.created[0].holders] == [
+        (colleague.user_id, member.user_id)
+    ]
+    with pytest.raises(NotFoundError):
+        await application.revoke_label_assignment(actor=colleague, assignment_id=assignment.id)
+    document = await application.create_text_document(actor=owner, title="Pipeline")
+    await application.set_visibility(actor=owner, document_id=document.id, visibility="public")
+    await application.set_labels(actor=owner, document_id=document.id, audience_labels=(sales.name,), restricted_labels=())
+    assert (await application.get_document(actor=colleague, document_id=document.id)).id == document.id
+    with pytest.raises(NotFoundError):
+        await application.get_document(actor=member, document_id=document.id)
+    dev = await application.create_org_label(actor=member, name="platform", tag="dev")
+    ordered = await application.label_directory(actor=member)
+    assert [row.name for row in ordered.catalog] == [dev.name, sales.name]
+    await application.revoke_label_assignment(actor=member, assignment_id=assignment.id)
+    with pytest.raises(NotFoundError):
+        await application.get_document(actor=colleague, document_id=document.id)
+    with pytest.raises(NotFoundError):
+        await application.delete_org_label(actor=colleague, label_id=sales.id)
+    await application.delete_org_label(actor=owner, label_id=sales.id)
+    assert all(row.id != sales.id for row in (await application.label_directory(actor=member)).catalog)

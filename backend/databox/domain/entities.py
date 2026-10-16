@@ -151,6 +151,41 @@ class MembershipAttributes:
         object.__setattr__(self, "labels", _labels(self.labels))
 
 
+def _token(value: str) -> str:
+    cleaned = _labels((value,))
+    if len(cleaned) != 1:
+        raise ValidationError("Document labels must be short tokens without spaces")
+    return cleaned[0]
+
+
+@dataclass(frozen=True, slots=True)
+class OrgLabel:
+    id: UUID
+    organization_id: UUID
+    name: str
+    tag: str
+    created_by: UUID | None = None
+    created_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", _token(self.name))
+        object.__setattr__(self, "tag", _token(self.tag))
+
+
+@dataclass(frozen=True, slots=True)
+class LabelAssignment:
+    id: UUID
+    organization_id: UUID
+    label_id: UUID
+    user_id: UUID
+    assigned_by: UUID | None = None
+    created_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if self.assigned_by is not None and self.assigned_by == self.user_id:
+            raise ValidationError("Assign a label to someone else")
+
+
 @dataclass(frozen=True, slots=True)
 class DocumentLink:
     id: UUID

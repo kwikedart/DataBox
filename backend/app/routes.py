@@ -36,6 +36,15 @@ class MembershipLabelRequest(BaseModel):
     labels: list[str] = Field(default_factory=list, max_length=32)
 
 
+class CreateLabelRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    tag: str = Field(min_length=1, max_length=64)
+
+
+class AssignLabelRequest(BaseModel):
+    user_id: UUID
+
+
 class PermissionRequest(BaseModel):
     user_id: UUID
     role: str
@@ -516,6 +525,109 @@ async def set_labels(
     except DomainError as exc:
         raise _http(exc) from exc
     return _document_payload(document)
+
+
+def _label_payload(label) -> dict:
+    return {
+        "labelId": str(label.id),
+        "name": label.name,
+        "tag": label.tag,
+        "createdBy": str(label.created_by) if label.created_by else None,
+    }
+
+
+@router.get("/labels")
+async def label_directory(
+    actor=Depends(get_actor),
+    application: DataboxApplication = Depends(get_databox_application),
+):
+    try:
+        directory = await application.label_directory(actor=actor)
+    except DomainError as exc:
+        raise _http(exc) from exc
+    return {
+        "received": [
+            {
+                "assignmentId": str(row.assignment_id),
+                "assignedBy": str(row.assigned_by) if row.assigned_by else None,
+                **_label_payload(row.label),
+            }
+            for row in directory.received
+        ],
+        "created": [
+            {
+                **_label_payload(row.label),
+                "holders": [
+                    {
+                        "assignmentId": str(holder.assignment_id),
+                        "userId": str(holder.user_id),
+                        "assignedBy": str(holder.assigned_by) if holder.assigned_by else None,
+                    }
+                    for holder in row.holders
+                ],
+            }
+            for row in directory.created
+        ],
+        "catalog": [_label_payload(label) for label in directory.catalog],
+    }
+
+
+@router.post("/labels", status_code=201)
+async def create_label(
+    payload: CreateLabelRequest,
+    actor=Depends(get_actor),
+    application: DataboxApplication = Depends(get_databox_application),
+):
+    try:
+        label = await application.create_org_label(actor=actor, name=payload.name, tag=payload.tag)
+    except DomainError as exc:
+        raise _http(exc) from exc
+    return _label_payload(label)
+
+
+@router.delete("/labels/{label_id}", status_code=204)
+async def delete_label(
+    label_id: UUID,
+    actor=Depends(get_actor),
+    application: DataboxApplication = Depends(get_databox_application),
+):
+    try:
+        await application.delete_org_label(actor=actor, label_id=label_id)
+    except DomainError as exc:
+        raise _http(exc) from exc
+    return Response(status_code=204)
+
+
+@router.post("/labels/{label_id}/assignments", status_code=201)
+async def assign_label(
+    label_id: UUID,
+    payload: AssignLabelRequest,
+    actor=Depends(get_actor),
+    application: DataboxApplication = Depends(get_databox_application),
+):
+    try:
+        assignment = await application.assign_label(actor=actor, label_id=label_id, user_id=payload.user_id)
+    except DomainError as exc:
+        raise _http(exc) from exc
+    return {
+        "assignmentId": str(assignment.id),
+        "labelId": str(assignment.label_id),
+        "userId": str(assignment.user_id),
+        "assignedBy": str(assignment.assigned_by) if assignment.assigned_by else None,
+    }
+
+
+@router.delete("/label-assignments/{assignment_id}", status_code=204)
+async def revoke_label_assignment(
+    assignment_id: UUID,
+    actor=Depends(get_actor),
+    application: DataboxApplication = Depends(get_databox_application),
+):
+    try:
+        await application.revoke_label_assignment(actor=actor, assignment_id=assignment_id)
+    except DomainError as exc:
+        raise _http(exc) from exc
+    return Response(status_code=204)
 
 
 @router.get("/membership-attributes")

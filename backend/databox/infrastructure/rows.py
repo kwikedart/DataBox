@@ -105,6 +105,30 @@ class DataboxDocumentVersionRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class DataboxLabelRow(Base):
+    __tablename__ = "databox_labels"
+    __table_args__ = (UniqueConstraint("organization_id", "name", name="uq_databox_labels_org_name"),)
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    tag: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by: Mapped[Optional[UUID]] = mapped_column(PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class DataboxLabelAssignmentRow(Base):
+    __tablename__ = "databox_label_assignments"
+    __table_args__ = (UniqueConstraint("label_id", "user_id", name="uq_databox_label_assignment"),)
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    label_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("databox_labels.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    assigned_by: Mapped[Optional[UUID]] = mapped_column(PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class DataboxMembershipAttributeRow(Base):
     __tablename__ = "databox_membership_attributes"
     __table_args__ = (UniqueConstraint("organization_id", "user_id", name="uq_databox_membership_attributes"),)

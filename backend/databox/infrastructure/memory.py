@@ -18,7 +18,9 @@ from databox.domain.entities import (
     DocumentLink,
     DocumentPermission,
     DocumentVersion,
+    LabelAssignment,
     MembershipAttributes,
+    OrgLabel,
     ShareLink,
     UploadOperation,
 )
@@ -33,6 +35,8 @@ class MemoryDataboxStore:
         self.requests: dict[tuple[UUID, UUID], AccessRequest] = {}
         self.members: dict[tuple[UUID, UUID], str] = {}
         self.attributes: dict[tuple[UUID, UUID], MembershipAttributes] = {}
+        self.labels: dict[UUID, OrgLabel] = {}
+        self.assignments: dict[UUID, LabelAssignment] = {}
         self.links: dict[UUID, DocumentLink] = {}
         self.uploads: dict[UUID, UploadOperation] = {}
         self.audits: list[AuditEvent] = []
@@ -149,12 +153,71 @@ class MemoryDataboxStore:
 
     async def get_attributes(self, organization_id: UUID, user_id: UUID) -> frozenset[str]:
         row = self.attributes.get((organization_id, user_id))
-        if row is None:
-            return frozenset()
-        return frozenset(row.labels)
+        names = set(row.labels) if row is not None else set()
+        for assignment in self.assignments.values():
+            if assignment.organization_id != organization_id or assignment.user_id != user_id:
+                continue
+            label = self.labels.get(assignment.label_id)
+            if label is not None and label.organization_id == organization_id:
+                names.add(label.name)
+        return frozenset(names)
 
     async def save_attributes(self, attributes: MembershipAttributes) -> None:
         self.attributes[(attributes.organization_id, attributes.user_id)] = attributes
+
+    async def list_labels(self, organization_id: UUID) -> list[OrgLabel]:
+        return [row for row in self.labels.values() if row.organization_id == organization_id]
+
+    async def get_label(self, organization_id: UUID, label_id: UUID) -> OrgLabel | None:
+        row = self.labels.get(label_id)
+        if row is None or row.organization_id != organization_id:
+            return None
+        return row
+
+    async def find_label_by_name(self, organization_id: UUID, name: str) -> OrgLabel | None:
+        for row in self.labels.values():
+            if row.organization_id == organization_id and row.name == name:
+                return row
+        return None
+
+    async def save_label(self, label: OrgLabel) -> None:
+        self.labels[label.id] = label
+
+    async def delete_label(self, organization_id: UUID, label_id: UUID) -> None:
+        row = self.labels.get(label_id)
+        if row is None or row.organization_id != organization_id:
+            return
+        del self.labels[label_id]
+        self.assignments = {
+            key: assignment
+            for key, assignment in self.assignments.items()
+            if assignment.label_id != label_id
+        }
+
+    async def list_assignments(self, organization_id: UUID) -> list[LabelAssignment]:
+        return [row for row in self.assignments.values() if row.organization_id == organization_id]
+
+    async def find_assignment(self, label_id: UUID, user_id: UUID) -> LabelAssignment | None:
+        for row in self.assignments.values():
+            if row.label_id == label_id and row.user_id == user_id:
+                return row
+        return None
+
+    async def save_assignment(self, assignment: LabelAssignment) -> None:
+        self.assignments[assignment.id] = assignment
+
+    async def delete_assignment(self, organization_id: UUID, assignment_id: UUID) -> None:
+        row = self.assignments.get(assignment_id)
+        if row is None or row.organization_id != organization_id:
+            return
+        del self.assignments[assignment_id]
+
+    async def delete_user_assignments(self, organization_id: UUID, user_id: UUID) -> None:
+        self.assignments = {
+            key: assignment
+            for key, assignment in self.assignments.items()
+            if not (assignment.organization_id == organization_id and assignment.user_id == user_id)
+        }
 
     async def get_member_role(self, organization_id: UUID, user_id: UUID) -> str | None:
         return self.members.get((organization_id, user_id))

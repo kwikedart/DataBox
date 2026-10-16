@@ -20,7 +20,9 @@ from databox.domain.entities import (
     DocumentLink,
     DocumentPermission,
     DocumentVersion,
+    LabelAssignment,
     MembershipAttributes,
+    OrgLabel,
     PageGrant,
     ShareLink,
     UploadOperation,
@@ -56,6 +58,9 @@ logger = logging.getLogger("databox")
 
 _DOC_EPOCH = "databox:doc-epoch:{0}"
 _SHARE_EPOCH = "databox:share-epoch:{0}"
+_LABEL_CAP = 64
+_ASSIGNMENT_CAP = 32
+_TAG_RANK = {"owner": 0, "admin": 1, "dev": 2, "sales": 3, "member": 4, "contractor": 5, "viewer": 6}
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +86,33 @@ class VersionShare:
     url_token: str
     expires_at: datetime
     current: bool
+
+
+@dataclass(frozen=True, slots=True)
+class LabelHolder:
+    assignment_id: UUID
+    user_id: UUID
+    assigned_by: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class ReceivedLabel:
+    assignment_id: UUID
+    label: OrgLabel
+    assigned_by: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class CreatedLabel:
+    label: OrgLabel
+    holders: tuple[LabelHolder, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class LabelDirectory:
+    received: tuple[ReceivedLabel, ...]
+    created: tuple[CreatedLabel, ...]
+    catalog: tuple[OrgLabel, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -806,14 +838,195 @@ class DataboxApplication:
     ) -> MembershipAttributes:
         if "manage_shares" not in org_actions(actor.role):
             raise NotFoundError("Document not found")
+        if user_id == actor.user_id:
+            raise ValidationError("Assign a label to someone else")
+        if await self.store.get_member_role(actor.organization_id, user_id) is None:
+            raise ValidationError("That user is not in this organization")
         attributes = MembershipAttributes(
             organization_id=actor.organization_id,
             user_id=user_id,
             labels=labels,
         )
         await self.store.save_attributes(attributes)
+        await self.store.delete_user_assignments(actor.organization_id, user_id)
+        for name in attributes.labels:
+            await self._ensure_assignment(actor, user_id, name, tag="imported")
         await self.transaction.commit()
         return attributes
+
+    async def create_org_label(self, *, actor: TenantIdentity, name: str, tag: str) -> OrgLabel:
+        await self._require_member(actor)
+        self._rate(f"label-create:{actor.user_id}", 30)
+        label = OrgLabel(
+            id=uuid4(),
+            organization_id=actor.organization_id,
+            name=name,
+            tag=tag,
+            created_by=actor.user_id,
+            created_at=self._now(),
+        )
+        existing = await self.store.find_label_by_name(actor.organization_id, label.name)
+        if existing is not None:
+            raise ValidationError("That label already exists")
+        if len(await self.store.list_labels(actor.organization_id)) >= _LABEL_CAP:
+            raise ValidationError("This organization already has 64 labels")
+        await self.store.save_label(label)
+        await self._audit(
+            organization_id=actor.organization_id,
+            actor_user_id=actor.user_id,
+            document_id=None,
+            action="label.create",
+            resource_type="label",
+            resource_id=label.id,
+            outcome="success",
+        )
+        await self.transaction.commit()
+        return label
+
+    async def assign_label(self, *, actor: TenantIdentity, label_id: UUID, user_id: UUID) -> LabelAssignment:
+        await self._require_member(actor)
+        self._rate(f"label-assign:{actor.user_id}", 60)
+        if user_id == actor.user_id:
+            raise ValidationError("Assign a label to someone else")
+        if await self.store.get_member_role(actor.organization_id, user_id) is None:
+            raise ValidationError("That user is not in this organization")
+        label = await self.store.get_label(actor.organization_id, label_id)
+        if label is None:
+            raise NotFoundError("Document not found")
+        current = await self.store.find_assignment(label.id, user_id)
+        if current is not None:
+            return current
+        held = [
+            row
+            for row in await self.store.list_assignments(actor.organization_id)
+            if row.user_id == user_id
+        ]
+        if len(held) >= _ASSIGNMENT_CAP:
+            raise ValidationError("That person already has 32 labels")
+        assignment = LabelAssignment(
+            id=uuid4(),
+            organization_id=actor.organization_id,
+            label_id=label.id,
+            user_id=user_id,
+            assigned_by=actor.user_id,
+            created_at=self._now(),
+        )
+        await self.store.save_assignment(assignment)
+        await self._audit(
+            organization_id=actor.organization_id,
+            actor_user_id=actor.user_id,
+            document_id=None,
+            action="label.assign",
+            resource_type="label_assignment",
+            resource_id=assignment.id,
+            outcome="success",
+        )
+        await self.transaction.commit()
+        return assignment
+
+    async def revoke_label_assignment(self, *, actor: TenantIdentity, assignment_id: UUID) -> None:
+        await self._require_member(actor)
+        assignment = next(
+            (
+                row
+                for row in await self.store.list_assignments(actor.organization_id)
+                if row.id == assignment_id
+            ),
+            None,
+        )
+        if assignment is None:
+            raise NotFoundError("Document not found")
+        managing = "manage_shares" in org_actions(actor.role)
+        if assignment.assigned_by != actor.user_id and not managing:
+            raise NotFoundError("Document not found")
+        await self.store.delete_assignment(actor.organization_id, assignment.id)
+        await self._audit(
+            organization_id=actor.organization_id,
+            actor_user_id=actor.user_id,
+            document_id=None,
+            action="label.revoke",
+            resource_type="label_assignment",
+            resource_id=assignment.id,
+            outcome="success",
+        )
+        await self.transaction.commit()
+
+    async def delete_org_label(self, *, actor: TenantIdentity, label_id: UUID) -> None:
+        await self._require_member(actor)
+        label = await self.store.get_label(actor.organization_id, label_id)
+        if label is None:
+            raise NotFoundError("Document not found")
+        managing = "manage_shares" in org_actions(actor.role)
+        if label.created_by != actor.user_id and not managing:
+            raise NotFoundError("Document not found")
+        await self.store.delete_label(actor.organization_id, label.id)
+        await self._audit(
+            organization_id=actor.organization_id,
+            actor_user_id=actor.user_id,
+            document_id=None,
+            action="label.delete",
+            resource_type="label",
+            resource_id=label.id,
+            outcome="success",
+        )
+        await self.transaction.commit()
+
+    async def label_directory(self, *, actor: TenantIdentity) -> LabelDirectory:
+        await self._require_member(actor)
+        labels = await self.store.list_labels(actor.organization_id)
+        assignments = await self.store.list_assignments(actor.organization_id)
+        by_id = {label.id: label for label in labels}
+
+        def sort_key(label: OrgLabel) -> tuple[int, str]:
+            return (_TAG_RANK.get(label.tag, len(_TAG_RANK)), label.name)
+
+        received: list[ReceivedLabel] = []
+        for row in assignments:
+            if row.user_id != actor.user_id or row.label_id not in by_id:
+                continue
+            received.append(ReceivedLabel(assignment_id=row.id, label=by_id[row.label_id], assigned_by=row.assigned_by))
+        received.sort(key=lambda row: sort_key(row.label))
+        created: list[CreatedLabel] = []
+        for label in sorted((row for row in labels if row.created_by == actor.user_id), key=sort_key):
+            holders = tuple(
+                LabelHolder(assignment_id=row.id, user_id=row.user_id, assigned_by=row.assigned_by)
+                for row in assignments
+                if row.label_id == label.id
+            )
+            created.append(CreatedLabel(label=label, holders=holders))
+        catalog = tuple(sorted(labels, key=sort_key))
+        return LabelDirectory(received=tuple(received), created=tuple(created), catalog=catalog)
+
+    async def _require_member(self, actor: TenantIdentity) -> None:
+        if await self.store.get_member_role(actor.organization_id, actor.user_id) is None:
+            raise NotFoundError("Document not found")
+
+    async def _ensure_assignment(self, actor: TenantIdentity, user_id: UUID, name: str, *, tag: str) -> None:
+        label = await self.store.find_label_by_name(actor.organization_id, name)
+        if label is None:
+            if len(await self.store.list_labels(actor.organization_id)) >= _LABEL_CAP:
+                raise ValidationError("This organization already has 64 labels")
+            label = OrgLabel(
+                id=uuid4(),
+                organization_id=actor.organization_id,
+                name=name,
+                tag=tag,
+                created_by=actor.user_id,
+                created_at=self._now(),
+            )
+            await self.store.save_label(label)
+        if await self.store.find_assignment(label.id, user_id) is not None:
+            return
+        await self.store.save_assignment(
+            LabelAssignment(
+                id=uuid4(),
+                organization_id=actor.organization_id,
+                label_id=label.id,
+                user_id=user_id,
+                assigned_by=actor.user_id,
+                created_at=self._now(),
+            )
+        )
 
     async def grant_permission(
         self, *, actor: TenantIdentity, document_id: UUID, user_id: UUID, role: str
