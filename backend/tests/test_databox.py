@@ -671,6 +671,51 @@ async def test_text_document_can_be_shared_for_editing() -> None:
         await application.create_text_document(actor=guest, title="Denied")
 
 
+def test_document_html_keeps_editor_structure_and_drops_unsafe_links() -> None:
+    from pycrdt import Doc, XmlElement, XmlFragment, XmlText
+
+    from databox.infrastructure.render_job import document_html
+
+    document = Doc()
+    fragment = document.get("content", type=XmlFragment)
+    heading = XmlElement("heading", {"level": 3})
+    quote = XmlElement("blockquote")
+    paragraph = XmlElement("paragraph")
+    items = XmlElement("bulletList")
+    item = XmlElement("listItem")
+    item_paragraph = XmlElement("paragraph")
+    code = XmlElement("codeBlock")
+    rejected = XmlElement("script")
+    rule = XmlElement("horizontalRule")
+    for node in (heading, quote, items, code, rule, rejected):
+        fragment.children.append(node)
+    quote.children.append(paragraph)
+    items.children.append(item)
+    item.children.append(item_paragraph)
+    heading.children.append(XmlText("Agenda"))
+    linked = XmlText("safe and bad")
+    paragraph.children.append(linked)
+    linked.format(0, 4, {"link": {"href": "https://example.com/a"}, "italic": True})
+    linked.format(9, 12, {"link": {"href": "javascript:alert(1)"}, "bold": True})
+    item_paragraph.children.append(XmlText("First"))
+    code.children.append(XmlText("<script>alert(1)</script>"))
+    rejected.children.append(XmlText("nope"))
+
+    html = document_html(document)
+
+    assert "<h3>Agenda</h3>" in html
+    assert "<blockquote><p>" in html
+    assert 'href="https://example.com/a"' in html
+    assert "<em>safe</em>" in html
+    assert "javascript:" not in html
+    assert "<strong>bad</strong>" in html
+    assert "<ul><li><p>First</p></li></ul>" in html
+    assert "<pre><code>&lt;script&gt;alert(1)&lt;/script&gt;</code></pre>" in html
+    assert "<hr>" in html
+    assert "<script>" not in html
+    assert "<p>nope</p>" in html
+
+
 def note_update() -> bytes:
     from pycrdt import Doc, XmlElement, XmlFragment, XmlText
 

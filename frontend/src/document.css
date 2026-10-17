@@ -1,0 +1,739 @@
+.desk {
+  --ink: #0b1c30;
+  --muted: #45464d;
+  --line: #c6c6cd;
+  --canvas: #f8f9ff;
+  --card: #ffffff;
+  --low: #eff4ff;
+  --container: #e5eeff;
+  --high: #dce9ff;
+  --primary: #000000;
+  --on-primary: #ffffff;
+  --secondary: #0051d5;
+  --ok: #009668;
+  box-sizing: border-box;
+  position: relative;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: Inter, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.desk *,
+.desk *::before,
+.desk *::after {
+  box-sizing: border-box;
+}
+
+.desk h1,
+.desk h2,
+.desk p {
+  margin: 0;
+  font-family: inherit;
+}
+
+.desk a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.desk button,
+.desk input,
+.desk select,
+.desk textarea {
+  font: inherit;
+}
+
+.desk button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.desk button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.desk button:focus-visible,
+.desk a:focus-visible,
+.desk input:focus-visible,
+.desk textarea:focus-visible {
+  outline: 2px solid var(--secondary);
+  outline-offset: 2px;
+}
+
+.desk-top,
+.desk-sub,
+.desk-tools,
+.desk-status {
+  flex: none;
+  background: var(--card);
+  border-color: var(--line);
+}
+
+.desk-top {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 32px;
+  border-bottom: 1px solid var(--line);
+}
+
+.desk-brand,
+.desk-top-side,
+.desk-crumb a,
+.desk-title-row,
+.desk-chips,
+.desk-actions,
+.desk-chip,
+.desk-primary,
+.desk-secondary,
+.desk-account,
+.desk-tool,
+.desk-history-button,
+.desk-status p {
+  display: flex;
+  align-items: center;
+}
+
+.desk-brand,
+.desk-top-side,
+.desk-actions,
+.desk-chips,
+.desk-inline-actions {
+  gap: 8px;
+}
+
+.desk-brand {
+  gap: 16px;
+  min-width: 0;
+}
+
+.desk-brand > a {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.desk-mark {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.desk-nav-current {
+  color: var(--secondary);
+  font-size: 12px;
+  font-weight: 600;
+  border-bottom: 2px solid var(--secondary);
+  padding-bottom: 2px;
+}
+
+.desk .desk-primary,
+.desk .desk-secondary,
+.desk .desk-history-button {
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.desk .desk-primary {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.desk .desk-primary:hover:not(:disabled) {
+  background: #131b2e;
+}
+
+.desk .desk-secondary,
+.desk .desk-history-button {
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.desk .desk-secondary:hover:not(:disabled),
+.desk .desk-history-button:hover {
+  background: var(--low);
+}
+
+.desk .desk-history-button.on {
+  background: var(--low);
+  color: var(--secondary);
+  border-color: #b4c5ff;
+}
+
+.desk-account {
+  padding: 4px;
+  border-radius: 999px;
+}
+
+.desk-avatar,
+.desk-face {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.desk-avatar {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--high);
+}
+
+.desk-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: transparent;
+}
+
+.desk-menu {
+  position: absolute;
+  top: 52px;
+  right: 24px;
+  z-index: 50;
+  display: grid;
+  gap: 8px;
+  min-width: 220px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: 0 8px 24px rgba(11, 28, 48, 0.08);
+}
+
+.desk-menu p {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.desk-sub {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 32px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.desk-identity {
+  min-width: 0;
+}
+
+.desk-crumb a {
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.desk-crumb a:hover {
+  color: var(--ink);
+}
+
+.desk-crumb svg {
+  transform: rotate(180deg);
+}
+
+.desk-title-row {
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.desk-title-row h1 {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 28px;
+}
+
+.desk-chips {
+  flex-wrap: wrap;
+}
+
+.desk-chip {
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid #b4c5ff;
+  border-radius: 4px;
+  background: var(--low);
+  color: var(--secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.desk-chip.quiet {
+  border-color: var(--line);
+  background: var(--container);
+  color: var(--muted);
+  font-family: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  font-weight: 500;
+}
+
+.desk-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.desk-faces {
+  display: flex;
+  padding-right: 8px;
+}
+
+.desk-face {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  margin-left: -8px;
+  border: 2px solid var(--card);
+  border-radius: 999px;
+  background: var(--high);
+}
+
+.desk-faces .desk-face:first-child {
+  margin-left: 0;
+}
+
+.desk-face.you {
+  box-shadow: 0 0 0 2px var(--secondary);
+}
+
+.desk-face .dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--card);
+  border-radius: 999px;
+  background: var(--secondary);
+}
+
+.desk-tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  z-index: 30;
+  display: none;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+.desk-face:hover .desk-tip,
+.desk-face:focus-visible .desk-tip {
+  display: block;
+}
+
+.desk-save {
+  position: relative;
+}
+
+.desk-save-note {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: 280px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: 0 8px 24px rgba(11, 28, 48, 0.08);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.desk-save:hover .desk-save-note,
+.desk-save:focus-within .desk-save-note {
+  opacity: 1;
+}
+
+.desk-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 32px;
+  border-bottom: 1px solid var(--line);
+}
+
+.desk-tools-scroll {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.desk-rule {
+  width: 1px;
+  height: 16px;
+  margin: 0 6px;
+  background: var(--line);
+}
+
+.desk .desk-tool {
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.desk .desk-tool:hover:not(:disabled) {
+  background: var(--low);
+}
+
+.desk .desk-tool.on {
+  background: var(--high);
+  color: var(--secondary);
+}
+
+.desk-tool b,
+.desk-tool i,
+.desk-tool u {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.desk-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 32px;
+  border-bottom: 1px solid var(--line);
+  background: var(--card);
+}
+
+.desk-link label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.desk-link input {
+  flex: 1 1 220px;
+  width: auto;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--ink);
+}
+
+.desk-canvas {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 32px 16px 48px;
+}
+
+.desk-stage {
+  width: min(900px, 100%);
+  margin: 0 auto;
+}
+
+.desk-stage.with-history {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 16px;
+  width: min(1200px, 100%);
+  align-items: start;
+}
+
+.desk-sheet {
+  min-height: 720px;
+  padding: 48px 64px 64px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: 0 1px 2px rgba(11, 28, 48, 0.04);
+}
+
+.desk-sheet .ProseMirror {
+  min-height: 640px;
+  outline: none;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.desk-sheet.is-empty .ProseMirror::before {
+  content: "Start writing";
+  float: left;
+  height: 0;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.desk-sheet .ProseMirror h1,
+.desk-sheet .ProseMirror h2,
+.desk-sheet .ProseMirror h3 {
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+.desk-sheet .ProseMirror h1 {
+  margin: 0 0 12px;
+  font-size: 32px;
+}
+
+.desk-sheet .ProseMirror h2 {
+  margin: 28px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 18px;
+}
+
+.desk-sheet .ProseMirror h3 {
+  margin: 22px 0 8px;
+  font-size: 16px;
+}
+
+.desk-sheet .ProseMirror p {
+  margin: 0 0 12px;
+}
+
+.desk-sheet .ProseMirror ul,
+.desk-sheet .ProseMirror ol {
+  margin: 0 0 12px;
+  padding-left: 1.25rem;
+}
+
+.desk-sheet .ProseMirror li p {
+  margin: 0;
+}
+
+.desk-sheet .ProseMirror blockquote {
+  margin: 16px 0;
+  padding: 12px 16px;
+  border-left: 4px solid var(--secondary);
+  background: var(--canvas);
+}
+
+.desk-sheet .ProseMirror a {
+  color: var(--secondary);
+  text-underline-offset: 2px;
+}
+
+.desk-sheet .ProseMirror code {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--low);
+  font-family: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  font-size: 0.86em;
+}
+
+.desk-sheet .ProseMirror pre {
+  margin: 16px 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: #131b2e;
+  color: #f8f9ff;
+}
+
+.desk-sheet .ProseMirror pre code {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.desk-sheet .ProseMirror hr {
+  margin: 24px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.desk-history {
+  position: sticky;
+  top: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+}
+
+.desk-history h2 {
+  margin-bottom: 12px;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.desk-history ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.desk-history li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.desk-access {
+  width: min(1100px, 100%);
+  margin: 24px auto 0;
+}
+
+.desk-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 32px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.desk-status p {
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.desk-live {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--secondary);
+}
+
+.desk-live.wait {
+  background: var(--line);
+}
+
+.desk-status .sep {
+  color: var(--line);
+}
+
+.desk-notice,
+.desk-error.banner {
+  margin: 0;
+  padding: 8px 32px;
+  background: var(--card);
+}
+
+.desk-error,
+.desk-error.banner {
+  color: #93000a;
+}
+
+.desk-muted {
+  color: var(--muted);
+}
+
+.desk-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.desk-note {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.desk-note textarea {
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--ink);
+}
+
+.desk-sheet .page {
+  max-width: 100%;
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+@media (max-width: 800px) {
+  .desk-top,
+  .desk-sub,
+  .desk-tools,
+  .desk-link,
+  .desk-status,
+  .desk-notice,
+  .desk-error.banner {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .desk-sub,
+  .desk-status {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .desk-nav-current {
+    display: none;
+  }
+
+  .desk-sheet {
+    padding: 24px 20px 40px;
+  }
+
+  .desk-stage.with-history {
+    grid-template-columns: 1fr;
+  }
+
+  .desk-save-note {
+    right: auto;
+    left: 0;
+  }
+}

@@ -38,7 +38,7 @@ class MembershipLabelRequest(BaseModel):
 
 class CreateLabelRequest(BaseModel):
     name: str = Field(min_length=1, max_length=64)
-    tag: str = Field(min_length=1, max_length=64)
+    tag: str | None = Field(default=None, max_length=64)
 
 
 class AssignLabelRequest(BaseModel):
@@ -579,7 +579,11 @@ async def create_label(
     application: DataboxApplication = Depends(get_databox_application),
 ):
     try:
-        label = await application.create_org_label(actor=actor, name=payload.name, tag=payload.tag)
+        label = await application.create_org_label(
+            actor=actor,
+            name=payload.name,
+            tag=(payload.tag or "").strip() or payload.name,
+        )
     except DomainError as exc:
         raise _http(exc) from exc
     return _label_payload(label)

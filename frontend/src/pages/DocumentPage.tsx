@@ -1,45 +1,32 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, issueViewToken, type DocumentRow, type Session, type VersionRow } from "../api";
+import "../document.css";
+import { Icon } from "../icons";
+import { Shell } from "../shell";
 import { CollaborativeText } from "../CollaborativeText";
 import { connectCollaboration, type Annotation, type Presence } from "../collaboration";
+import { AccessRequestDialog } from "../AccessRequestDialog";
+import { AccessMatrix } from "./AccessMatrix";
 
-type VersionLink = {
-  shareId: string;
-  versionId: string;
-  permission: string;
-  token: string;
-  expiresAt: string;
-  current: boolean;
-};
-
-function shareUrl(token: string): string {
-  return `${window.location.origin}/share/${token}`;
+function roleLabel(role: string): string {
+  if (role === "owner") return "Owner";
+  if (role === "admin") return "Admin";
+  if (role === "viewer") return "Viewer";
+  return "Member";
 }
 
-function expiryLabel(iso: string): string {
-  const when = new Date(iso);
-  if (Number.isNaN(when.getTime())) return "";
-  return `Expires ${when.toLocaleString()}`;
+function initials(email: string): string {
+  const local = email.split("@")[0] ?? "";
+  const parts = local.split(/[._-]+/).filter(Boolean);
+  const letters = (parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "");
+  return (letters || local.slice(0, 2) || "DB").toUpperCase();
 }
 
-function labelsFromInput(value: string): string[] {
-  const seen = new Set<string>();
-  const labels: string[] = [];
-  for (const part of value.split(",")) {
-    const label = part.trim().toLowerCase();
-    if (!label || seen.has(label) || labels.length >= 32) continue;
-    seen.add(label);
-    labels.push(label);
-  }
-  return labels;
-}
-
-export function DocumentPage({ session }: { session: Session }) {
+export function DocumentPage({ session, onSignOut }: { session: Session; onSignOut: () => void }) {
   const { documentId = "" } = useParams();
   const [documentRow, setDocumentRow] = useState<DocumentRow | null>(null);
   const [versions, setVersions] = useState<VersionRow[]>([]);
-  const [links, setLinks] = useState<VersionLink[]>([]);
   const [pageUrl, setPageUrl] = useState("");
   const [status, setStatus] = useState("Collaboration: disconnected");
   const [canEdit, setCanEdit] = useState(false);
@@ -49,14 +36,11 @@ export function DocumentPage({ session }: { session: Session }) {
   const [presence, setPresence] = useState<Presence[]>([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [linkHours, setLinkHours] = useState("24");
-  const [audience, setAudience] = useState("");
-  const [restricted, setRestricted] = useState("");
-  const [personId, setPersonId] = useState("");
-  const [personRole, setPersonRole] = useState("viewer");
-  const [people, setPeople] = useState<{ userId: string; role: string }[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [accessView, setAccessView] = useState(() => window.location.hash.startsWith("#access"));
+  const [notice, setNotice] = useState("");
   const [editor, setEditor] = useState<ReturnType<typeof connectCollaboration> | null>(null);
-  const [requests, setRequests] = useState<{ requestId: string; userId: string; role: string }[]>([]);
   const canManage = session.role === "owner" || session.role === "admin";
   const canShare = canManage || documentRow?.createdBy === session.userId;
 
@@ -66,8 +50,6 @@ export function DocumentPage({ session }: { session: Session }) {
       const metadata = await api<DocumentRow>(`/api/v1/documents/${documentId}`, session);
       if (cancelled) return;
       setDocumentRow(metadata);
-      setAudience(metadata.audienceLabels.join(", "));
-      setRestricted(metadata.restrictedLabels.join(", "));
       if (metadata.canOpen === false) {
         setVersions([]);
         return;
@@ -81,38 +63,6 @@ export function DocumentPage({ session }: { session: Session }) {
       cancelled = true;
     };
   }, [documentId, session]);
-
-  useEffect(() => {
-    if (!canShare) return;
-    let cancelled = false;
-    api<{ links: VersionLink[] }>(`/api/v1/documents/${documentId}/shares`, session)
-      .then((payload) => {
-        if (!cancelled) setLinks(payload.links);
-      })
-      .catch(() => {
-        if (!cancelled) setLinks([]);
-      });
-    api<{ shares: { userId: string; role: string }[] }>(`/api/v1/documents/${documentId}/permissions`, session)
-      .then((payload) => {
-        if (!cancelled) setPeople(payload.shares);
-      })
-      .catch(() => {
-        if (!cancelled) setPeople([]);
-      });
-    api<{ requests: { requestId: string; userId: string; role: string }[] }>(
-      `/api/v1/documents/${documentId}/access-requests`,
-      session,
-    )
-      .then((payload) => {
-        if (!cancelled) setRequests(payload.requests);
-      })
-      .catch(() => {
-        if (!cancelled) setRequests([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [canShare, documentId, documentRow?.currentVersionId, session]);
 
   useEffect(() => {
     if (documentRow?.canOpen === false || documentRow?.mimeType !== "text/plain" || !documentRow.currentVersionId) return;
@@ -157,8 +107,11 @@ export function DocumentPage({ session }: { session: Session }) {
     };
   }, [pageUrl]);
 
-  const currentEdit = links.find((link) => link.current && link.permission === "editor");
-  const currentView = links.find((link) => link.current && link.permission === "viewer");
+  useEffect(() => {
+    const sync = () => setAccessView(window.location.hash.startsWith("#access"));
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
 
   async function viewPage() {
     setError("");
@@ -199,89 +152,6 @@ export function DocumentPage({ session }: { session: Session }) {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function reloadShares() {
-    if (!canShare) return;
-    const payload = await api<{ links: VersionLink[] }>(`/api/v1/documents/${documentId}/shares`, session);
-    setLinks(payload.links);
-  }
-
-  async function setLinkLifetime(versionId: string, permission: string) {
-    const hours = Number(linkHours);
-    if (!Number.isFinite(hours) || hours < 1 || hours > 168) {
-      setError("Link lifetime must be between 1 and 168 hours");
-      return;
-    }
-    setError("");
-    try {
-      await api(`/api/v1/documents/${documentId}/shares/lifetime`, session, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          version_id: versionId,
-          permission,
-          ttl_seconds: Math.round(hours * 3600),
-        }),
-      });
-      await reloadShares();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Link lifetime was not saved");
-    }
-  }
-
-  async function saveLabels() {
-    setError("");
-    try {
-      const saved = await api<DocumentRow>(`/api/v1/documents/${documentId}/labels`, session, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          audience_labels: labelsFromInput(audience),
-          restricted_labels: labelsFromInput(restricted),
-        }),
-      });
-      setDocumentRow(saved);
-      setAudience(saved.audienceLabels.join(", "));
-      setRestricted(saved.restrictedLabels.join(", "));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Labels were not saved");
-    }
-  }
-
-  async function reloadPeople() {
-    const payload = await api<{ shares: { userId: string; role: string }[] }>(
-      `/api/v1/documents/${documentId}/permissions`,
-      session,
-    );
-    setPeople(payload.shares);
-  }
-
-  async function shareWithUser() {
-    const userId = personId.trim();
-    if (!userId) return;
-    setError("");
-    try {
-      await api(`/api/v1/documents/${documentId}/permissions`, session, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId, role: personRole }),
-      });
-      setPersonId("");
-      await reloadPeople();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "That user was not shared");
-    }
-  }
-
-  async function removePerson(userId: string) {
-    setError("");
-    try {
-      await api(`/api/v1/documents/${documentId}/permissions/${userId}`, session, { method: "DELETE" });
-      await reloadPeople();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "That share was not removed");
     }
   }
 
@@ -340,265 +210,241 @@ export function DocumentPage({ session }: { session: Session }) {
       setDocumentRow((current) => (current ? { ...current, pendingRequest: role } : current));
     } catch (err) {
       setError(err instanceof Error ? err.message : "The request was not sent");
-    }
-  }
-
-  async function setVisibility(visibility: "public" | "private") {
-    setError("");
-    try {
-      const saved = await api<DocumentRow>(`/api/v1/documents/${documentId}/visibility`, session, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ visibility }),
-      });
-      setDocumentRow(saved);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Visibility was not saved");
-    }
-  }
-
-  async function decideRequest(requestId: string, approve: boolean) {
-    setError("");
-    try {
-      await api(`/api/v1/documents/${documentId}/access-requests/${requestId}`, session, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approve }),
-      });
-      setRequests((current) => current.filter((request) => request.requestId !== requestId));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "The request was not updated");
+      throw err;
     }
   }
 
   const textDocument = documentRow?.mimeType === "text/plain";
   const locked = documentRow?.canOpen === false;
+  const currentVersion = versions.find((version) => version.id === documentRow?.currentVersionId);
+  const publicDocument = documentRow?.visibility === "public";
+  const faces = (presence.length ? presence : [{ clientId: 0, name: session.email, page: 1 }]).slice(0, 5);
+  const access = documentRow && canShare && !locked ? (
+    <AccessMatrix session={session} document={documentRow} versions={versions} onDocument={setDocumentRow} />
+  ) : null;
+  const history = historyOpen ? (
+    <aside className="desk-history" aria-label="Version history">
+      <h2>Versions</h2>
+      <ul>
+        {versions.map((version) => {
+          const current = version.id === documentRow?.currentVersionId;
+          return (
+            <li key={version.id}>
+              <span>
+                Version {version.versionNumber}
+                {current ? " · current" : ""}
+              </span>
+              {textDocument || current ? null : (
+                <button type="button" className="desk-secondary" onClick={() => void restore(version.id)}>
+                  Restore
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </aside>
+  ) : null;
+
+  async function copyOrganizationId() {
+    try {
+      await navigator.clipboard.writeText(session.organizationId);
+      setNotice("Organization id copied.");
+    } catch {
+      setNotice("The organization id was not copied.");
+    }
+  }
+
+  if (accessView && access) {
+    return (
+      <Shell session={session} onSignOut={onSignOut} notice={notice}>
+        <div className="ui-title-row">
+          <div>
+            <Link to={`/documents/${documentId}`}>Back to document</Link>
+            <h1>Share and permissions</h1>
+          </div>
+        </div>
+        {access}
+      </Shell>
+    );
+  }
 
   return (
-    <main className="screen document-screen">
-      <header className="topbar">
-        <div>
-          <p className="mark">
-            <Link to="/">DataBox</Link>
-          </p>
-          <h1>{documentRow?.title ?? "Document"}</h1>
+    <div className="desk">
+      <header className="desk-top">
+        <div className="desk-brand">
+          <span className="desk-mark">
+            <Icon name="shield" size={16} />
+          </span>
+          <Link to="/">DataBox</Link>
+          <nav aria-label="Workspace">
+            <Link to="/" className="desk-nav-current">
+              Workspaces
+            </Link>
+          </nav>
+        </div>
+        <div className="desk-top-side">
+          <button type="button" className="desk-secondary" onClick={() => void copyOrganizationId()}>
+            <Icon name="copy" size={14} />
+            Copy org id
+          </button>
+          <button type="button" className="desk-account" aria-expanded={menuOpen} aria-label="Account" onClick={() => setMenuOpen((open) => !open)}>
+            <span className="desk-avatar">{initials(session.email)}</span>
+          </button>
         </div>
       </header>
-      {error ? <p className="error">{error}</p> : null}
-      {locked ? (
-        <section className="panel">
-          <p>This public document is visible to your organization. It opens when it is shared with you or tagged with one of your labels.</p>
-          {documentRow?.pendingRequest ? (
-            <p className="hint">Asked for {documentRow.pendingRequest === "editor" ? "edit" : "view"} access</p>
-          ) : (
-            <span className="actions">
-              <button type="button" onClick={() => void requestAccess("viewer")}>Ask to view</button>
-              <button type="button" className="secondary" onClick={() => void requestAccess("editor")}>Ask to edit</button>
-            </span>
-          )}
-        </section>
-      ) : (
-        <div className="split document-split">
-          <section className="panel editor-panel">
-            <div className="actions">
-              {textDocument ? (
-                <button type="button" onClick={() => void saveVersion()} disabled={saving || !documentRow?.currentVersionId}>
-                  {saving ? "Saving" : "Save version"}
-                </button>
-              ) : (
-                <button type="button" onClick={() => void viewPage()}>
-                  View page
-                </button>
-              )}
-              {textDocument ? null : (
-                <button type="button" className="secondary" onClick={collaborate}>
-                  Collaborate
-                </button>
-              )}
-            </div>
-            <p>{status}</p>
-            <p className="muted">Present: {presence.map((person) => person.name).join(", ") || "nobody else"}</p>
-            {textDocument && editor && ready ? <CollaborativeText doc={editor.doc} canEdit={canEdit} /> : null}
-            {textDocument && editor && !ready ? <p className="hint">Opening the shared editor</p> : null}
-            {pageUrl ? <img className="page" alt="Document page" src={pageUrl} /> : null}
-            {textDocument ? null : (
-              <>
-                {annotations
-                  .filter((item) => item.page === 1)
-                  .map((item) => (
-                    <p className="note" key={item.id}>
-                      {item.text}
-                    </p>
-                  ))}
-                <label>
-                  Annotation note
-                  <textarea value={note} rows={3} disabled={!canEdit} onChange={(event) => setNote(event.target.value)} />
-                </label>
-                <button
-                  type="button"
-                  disabled={!canEdit}
-                  onClick={() => {
-                    editor?.addNote(1, note);
-                    setNote("");
-                  }}
-                >
-                  Add annotation
-                </button>
-              </>
-            )}
-          </section>
-          <aside className="panel share-panel">
-            <h2>Access</h2>
-            {canManage ? (
-              <label>
-                Link lifetime in hours
-                <input
-                  type="number"
-                  min={1}
-                  max={168}
-                  value={linkHours}
-                  aria-label="Link lifetime in hours"
-                  onChange={(event) => setLinkHours(event.target.value)}
-                />
-              </label>
-            ) : null}
-            {currentEdit ? (
-              <>
-                <label>
-                  Edit link
-                  <input readOnly value={shareUrl(currentEdit.token)} aria-label="Edit link" />
-                </label>
-                <p className="hint">{expiryLabel(currentEdit.expiresAt)}</p>
-                {canManage ? (
-                  <button type="button" className="secondary" onClick={() => void setLinkLifetime(currentEdit.versionId, "editor")}>
-                    Set edit link expiry
-                  </button>
-                ) : null}
-              </>
-            ) : null}
-            {currentView ? (
-              <>
-                <label>
-                  View link
-                  <input readOnly value={shareUrl(currentView.token)} aria-label="View link" />
-                </label>
-                <p className="hint">{expiryLabel(currentView.expiresAt)}</p>
-                {canManage ? (
-                  <button type="button" className="secondary" onClick={() => void setLinkLifetime(currentView.versionId, "viewer")}>
-                    Set view link expiry
-                  </button>
-                ) : null}
-              </>
-            ) : null}
-            {canShare ? (
-              <>
-                <p className="hint">This document is {documentRow?.visibility === "public" ? "public" : "private"}.</p>
-                <span className="actions">
-                  <button type="button" className="secondary" onClick={() => void setVisibility("public")}>Make public</button>
-                  <button type="button" className="secondary" onClick={() => void setVisibility("private")}>Make private</button>
+      {menuOpen ? (
+        <>
+          <button type="button" className="desk-scrim" aria-label="Close account menu" onClick={() => setMenuOpen(false)} />
+          <div className="desk-menu">
+            <p>{session.email}</p>
+            <button type="button" className="desk-secondary" onClick={onSignOut}>
+              Sign out
+            </button>
+          </div>
+        </>
+      ) : null}
+      <section className="desk-sub">
+        <div className="desk-identity">
+          <div className="desk-crumb">
+            <Link to="/">
+              <Icon name="chevron" size={14} />
+              Back to workspace
+            </Link>
+          </div>
+          <div className="desk-title-row">
+            <h1>{documentRow?.title ?? "Document"}</h1>
+            <div className="desk-chips">
+              <span className="desk-chip">
+                <Icon name={publicDocument ? "globe" : "lock"} size={12} />
+                {publicDocument ? "Public document" : "Private document"}
+              </span>
+              {currentVersion ? <span className="desk-chip quiet">Version {currentVersion.versionNumber} · live</span> : null}
+              {documentRow?.audienceLabels.map((label) => (
+                <span className="desk-chip" key={label}>
+                  <Icon name="tag" size={12} />#{label}
                 </span>
-                {requests.map((request) => (
-                  <p key={request.requestId}>
-                    {request.userId} asked to {request.role === "editor" ? "edit" : "view"}
-                    <span className="actions">
-                      <button type="button" onClick={() => void decideRequest(request.requestId, true)}>Allow</button>
-                      <button type="button" className="secondary" onClick={() => void decideRequest(request.requestId, false)}>Deny</button>
-                    </span>
-                  </p>
-                ))}
-                <label>
-                  Share with user id
-                  <input
-                    value={personId}
-                    aria-label="Share with user id"
-                    placeholder="User id"
-                    onChange={(event) => setPersonId(event.target.value)}
-                  />
-                </label>
-                <label>
-                  Access for this user
-                  <select aria-label="Access for this user" value={personRole} onChange={(event) => setPersonRole(event.target.value)}>
-                    <option value="viewer">View</option>
-                    <option value="editor">Edit</option>
-                  </select>
-                </label>
-                <button type="button" className="secondary" onClick={() => void shareWithUser()} disabled={!personId.trim()}>
-                  Share with this user
-                </button>
-                <p className="hint">
-                  This share does not expire. The person signs in with that user id. A blocked label still keeps them out, and the access cannot exceed their organization role.
-                </p>
-                <ul>
-                  {people.map((person) => (
-                    <li key={person.userId}>
-                      {person.userId} ({person.role === "editor" ? "edit" : "view"})
-                      <button type="button" className="secondary" onClick={() => void removePerson(person.userId)}>
-                        Remove
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                <label>
-                  Always opened by
-                  <input
-                    value={audience}
-                    aria-label="Audience labels"
-                    placeholder="finance, legal"
-                    onChange={(event) => setAudience(event.target.value)}
-                  />
-                </label>
-                <p className="hint">People with one of these labels can open this public document. A private document still opens only for the people you share it with.</p>
-                <label>
-                  Blocked for
-                  <input
-                    value={restricted}
-                    aria-label="Restricted labels"
-                    placeholder="contractor"
-                    onChange={(event) => setRestricted(event.target.value)}
-                  />
-                </label>
-                <p className="hint">People with one of these labels cannot open this document.</p>
-                <button type="button" className="secondary" onClick={() => void saveLabels()}>
-                  Save document labels
-                </button>
-              </>
-            ) : null}
-            <h2>Versions</h2>
-            <ul>
-              {versions.map((version) => {
-                const view = links.find((link) => link.versionId === version.id && link.permission === "viewer");
-                const current = version.id === documentRow?.currentVersionId;
+              ))}
+              <span className="desk-chip quiet">{textDocument ? (ready ? (canEdit ? "Editing" : "Viewing") : "Connecting") : "Page"}</span>
+            </div>
+          </div>
+        </div>
+        <div className="desk-actions">
+          {locked ? null : (
+            <div className="desk-faces" aria-label="People in this document">
+              {faces.map((person) => {
+                const you = person.name === session.email;
                 return (
-                  <li key={version.id}>
-                    Version {version.versionNumber}
-                    {current ? " (current)" : ""}
-                    {view && !current ? (
-                      <>
-                        <input readOnly value={shareUrl(view.token)} aria-label={`Version ${version.versionNumber} view link`} />
-                        <p className="hint">{expiryLabel(view.expiresAt)}</p>
-                        {canManage ? (
-                          <button
-                            type="button"
-                            className="secondary"
-                            onClick={() => void setLinkLifetime(view.versionId, "viewer")}
-                          >
-                            Set this link expiry
-                          </button>
-                        ) : null}
-                      </>
-                    ) : null}
-                    {textDocument ? null : (
-                      <button type="button" className="secondary" onClick={() => void restore(version.id)}>
-                        Restore
-                      </button>
-                    )}
-                  </li>
+                  <span className={you ? "desk-face you" : "desk-face"} key={person.clientId} tabIndex={0}>
+                    {initials(person.name)}
+                    <span className="dot" />
+                    <span className="desk-tip">
+                      {person.name}
+                      {you ? ` · You · ${canEdit ? "Editing" : "Viewing"}` : " · Present"}
+                    </span>
+                  </span>
                 );
               })}
-            </ul>
-          </aside>
+            </div>
+          )}
+          {canShare && !locked ? (
+            <button type="button" className="desk-secondary" onClick={() => { window.location.hash = "access"; }}>
+              <Icon name="lock" size={14} />
+              Share and permissions
+            </button>
+          ) : null}
+          {textDocument && !locked ? (
+            <div className="desk-save">
+              <button type="button" className="desk-primary" onClick={() => void saveVersion()} disabled={saving || !documentRow?.currentVersionId || locked}>
+                <Icon name="check" size={14} />
+                {saving ? "Saving" : "Save version"}
+              </button>
+              <p className="desk-save-note">Saves this draft as the next version. Older edit links stop opening the current text.</p>
+            </div>
+          ) : locked ? null : (
+            <button type="button" className="desk-primary" onClick={() => void viewPage()}>
+              View page
+            </button>
+          )}
         </div>
+      </section>
+      {notice ? <p className="desk-notice">{notice}</p> : null}
+      {error ? <p className="desk-error banner">{error}</p> : null}
+      {locked && documentRow ? (
+        <AccessRequestDialog
+          session={session}
+          document={documentRow}
+          onClose={() => {
+            window.location.assign("/");
+          }}
+          onRequested={requestAccess}
+        />
+      ) : textDocument && editor && ready ? (
+        <CollaborativeText doc={editor.doc} canEdit={canEdit} history={history} onHistory={() => setHistoryOpen((open) => !open)} />
+      ) : (
+        <main className="desk-canvas">
+          <div className={historyOpen ? "desk-stage with-history" : "desk-stage"}>
+            <article className="desk-sheet">
+              {textDocument ? <p className="desk-muted">Opening the shared editor</p> : null}
+              {textDocument ? null : (
+                <div className="desk-inline-actions">
+                  <button type="button" className="desk-secondary" onClick={collaborate}>
+                    Collaborate
+                  </button>
+                  <button type="button" className="desk-secondary" onClick={() => setHistoryOpen((open) => !open)}>
+                    Version history
+                  </button>
+                </div>
+              )}
+              {pageUrl ? <img className="page" alt="Document page" src={pageUrl} /> : null}
+              {textDocument
+                ? null
+                : annotations
+                    .filter((item) => item.page === 1)
+                    .map((item) => (
+                      <p className="note" key={item.id}>
+                        {item.text}
+                      </p>
+                    ))}
+              {textDocument ? null : (
+                <label className="desk-note">
+                  Annotation note
+                  <textarea value={note} rows={3} disabled={!canEdit} onChange={(event) => setNote(event.target.value)} />
+                  <button
+                    type="button"
+                    className="desk-primary"
+                    disabled={!canEdit}
+                    onClick={() => {
+                      editor?.addNote(1, note);
+                      setNote("");
+                    }}
+                  >
+                    Add annotation
+                  </button>
+                </label>
+              )}
+            </article>
+            {history}
+          </div>
+        </main>
       )}
-    </main>
+      {textDocument && !locked ? (
+        <footer className="desk-status">
+          <p>
+            <span className={ready ? "desk-live" : "desk-live wait"} />
+            {ready ? "Shared editing is connected" : "Connecting the shared editor"}
+            <span className="sep">·</span>
+            {session.email} [{roleLabel(session.role)}]
+            {documentRow?.audienceLabels.length ? (
+              <>
+                <span className="sep">·</span>
+                {documentRow.audienceLabels.map((label) => `#${label}`).join(", ")}
+              </>
+            ) : null}
+          </p>
+          <p>{ready ? (canEdit ? "You can edit" : "You can view") : status}</p>
+        </footer>
+      ) : null}
+    </div>
   );
 }

@@ -16,11 +16,25 @@ type IconName =
   | "info"
   | "warning"
   | "close"
-  | "check";
+  | "check"
+  | "folder"
+  | "person"
+  | "users"
+  | "globe"
+  | "inbox"
+  | "plus"
+  | "copy"
+  | "grid"
+  | "filter"
+  | "file"
+  | "share"
+  | "menu"
+  | "search"
+  | "chevron";
 
-export function Icon({ name }: { name: IconName }) {
+export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   return (
-    <svg aria-hidden="true" fill="none" height="18" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" width="18">
+    <svg aria-hidden="true" fill="none" height={size} stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" width={size}>
       {paths[name]}
     </svg>
   );
@@ -108,4 +122,69 @@ const paths: Record<IconName, ReactNode> = {
   ),
   close: <path d="M6 6l12 12M18 6L6 18" />,
   check: <path d="M5 12l5 5L20 7" />,
+  folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />,
+  person: (
+    <>
+      <circle cx="12" cy="8" r="3" />
+      <path d="M5 19a7 7 0 0 1 14 0" />
+    </>
+  ),
+  users: (
+    <>
+      <circle cx="9" cy="8" r="3" />
+      <path d="M3 19a6 6 0 0 1 12 0" />
+      <path d="M16 11a3 3 0 1 0 0-6" />
+      <path d="M17 19a6 6 0 0 0-3-5.2" />
+    </>
+  ),
+  globe: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+    </>
+  ),
+  inbox: (
+    <>
+      <path d="M3 13l2-8h14l2 8" />
+      <path d="M3 13h5l1 3h6l1-3h5v6H3v-6z" />
+    </>
+  ),
+  plus: <path d="M12 5v14M5 12h14" />,
+  copy: (
+    <>
+      <rect height="12" rx="1" width="10" x="8" y="8" />
+      <path d="M6 16H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+    </>
+  ),
+  grid: (
+    <>
+      <rect height="7" rx="1" width="7" x="3" y="3" />
+      <rect height="7" rx="1" width="7" x="14" y="3" />
+      <rect height="7" rx="1" width="7" x="3" y="14" />
+      <rect height="7" rx="1" width="7" x="14" y="14" />
+    </>
+  ),
+  filter: <path d="M4 5h16l-6 7v6l-4 2v-8L4 5z" />,
+  file: (
+    <>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z" />
+      <path d="M14 3v5h5" />
+    </>
+  ),
+  share: (
+    <>
+      <circle cx="6" cy="12" r="2" />
+      <circle cx="16" cy="7" r="2" />
+      <circle cx="16" cy="17" r="2" />
+      <path d="M8 11l6-3M8 13l6 3" />
+    </>
+  ),
+  menu: <path d="M4 7h16M4 12h16M4 17h16" />,
+  search: (
+    <>
+      <circle cx="11" cy="11" r="6" />
+      <path d="M16 16l4 4" />
+    </>
+  ),
+  chevron: <path d="M9 6l6 6-6 6" />,
 };

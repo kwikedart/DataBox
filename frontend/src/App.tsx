@@ -1,16 +1,21 @@
 import { useState } from "react";
 import { Route, Routes } from "react-router-dom";
-import { clearViewTokens, type Session } from "./api";
+import { clearSession, readSession, writeSession, type Session } from "./api";
 import { DocumentPage } from "./pages/DocumentPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SharePage } from "./pages/SharePage";
 import { WorkspacePage } from "./pages/WorkspacePage";
 
 export function App() {
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<Session | null>(() => readSession());
+
+  function signIn(next: Session) {
+    writeSession(next);
+    setSession(next);
+  }
 
   function signOut() {
-    clearViewTokens();
+    clearSession();
     setSession(null);
   }
 
@@ -23,7 +28,7 @@ export function App() {
             <SharePage session={session} />
           ) : (
             <LoginPage
-              onSession={setSession}
+              onSession={signIn}
               hint="Sign in before this link opens. The document checks who you are and which labels you have."
             />
           )
@@ -31,11 +36,11 @@ export function App() {
       />
       <Route
         path="/documents/:documentId"
-        element={session ? <DocumentPage session={session} /> : <LoginPage onSession={setSession} />}
+        element={session ? <DocumentPage session={session} onSignOut={signOut} /> : <LoginPage onSession={signIn} />}
       />
       <Route
         path="*"
-        element={session ? <WorkspacePage session={session} onSignOut={signOut} /> : <LoginPage onSession={setSession} />}
+        element={session ? <WorkspacePage session={session} onSignOut={signOut} /> : <LoginPage onSession={signIn} />}
       />
     </Routes>
   );

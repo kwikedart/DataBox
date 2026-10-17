@@ -262,47 +262,6 @@ ul {
   padding-left: 18px;
 }
 
-.doc-editor {
-  margin-top: 12px;
-  border: 1px solid #d9cbb8;
-  border-radius: 14px;
-  background: white;
-  overflow: hidden;
-}
-
-.toolbar {
-  display: flex;
-  gap: 8px;
-  padding: 8px;
-  border-bottom: 1px solid var(--line);
-  background: #fbf7f1;
-}
-
-.toolbar button {
-  margin: 0;
-  border-radius: 8px;
-}
-
-.doc-editor .doc {
-  min-height: 420px;
-  padding: 18px 20px 28px;
-  outline: none;
-}
-
-.doc-editor h1 {
-  font-size: 1.7rem;
-  margin: 0.4rem 0;
-}
-
-.doc-editor h2 {
-  font-size: 1.3rem;
-  margin: 0.4rem 0;
-}
-
-.doc-editor p {
-  margin: 0.35rem 0;
-}
-
 @media (max-width: 800px) {
   .auth-screen,
   .split,

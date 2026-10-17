@@ -79,6 +79,39 @@ export function tokenExpiry(token: string): number {
   return (payload.exp ?? 0) * 1000;
 }
 
+const sessionKey = "databox:session";
+
+function isSession(value: unknown): value is Session {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Partial<Session>;
+  return Boolean(row.token && row.userId && row.organizationId && row.role && row.email);
+}
+
+export function readSession(): Session | null {
+  const raw = sessionStorage.getItem(sessionKey);
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isSession(parsed) || tokenExpiry(parsed.token) <= Date.now() + 15_000) {
+      sessionStorage.removeItem(sessionKey);
+      return null;
+    }
+    return parsed;
+  } catch {
+    sessionStorage.removeItem(sessionKey);
+    return null;
+  }
+}
+
+export function writeSession(session: Session): void {
+  sessionStorage.setItem(sessionKey, JSON.stringify(session));
+}
+
+export function clearSession(): void {
+  sessionStorage.removeItem(sessionKey);
+  clearViewTokens();
+}
+
 const viewKey = (documentId: string) => `databox:view:${documentId}`;
 
 export function readViewToken(documentId: string): string | null {

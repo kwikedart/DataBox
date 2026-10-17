@@ -36,56 +36,133 @@ def rasterize_pdf(data: bytes, *, max_pages: int) -> list[bytes]:
 
 def _escape(text: str) -> str:
     cleaned = "".join(ch for ch in text if ch in "\n\t" or ord(ch) >= 32)
-    return cleaned.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return (
+        cleaned.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
 
 
-def _marks(attrs: dict | None) -> tuple[bool, bool]:
-    if not attrs:
-        return False, False
-    return "bold" in attrs, "italic" in attrs
+def _mark_on(attrs: dict | None, name: str) -> bool:
+    if not isinstance(attrs, dict) or name not in attrs:
+        return False
+    value = attrs[name]
+    return value is not False and value is not None
+
+
+def _safe_href(value: object) -> str | None:
+    """Allow http, https, and mailto. Everything else is dropped before HTML is emitted."""
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    if not candidate or len(candidate) > 2048:
+        return None
+    if any(ord(ch) < 32 or ord(ch) == 127 or ch.isspace() for ch in candidate):
+        return None
+    lowered = candidate.lower()
+    if lowered.startswith(("https://", "http://")):
+        host = candidate.split("://", 1)[1].split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+        if not host or "@" in host or "\\" in host or host.startswith("."):
+            return None
+        return candidate
+    if lowered.startswith("mailto:"):
+        address = candidate[7:]
+        if not address or any(ch in address for ch in "<>\"'\\"):
+            return None
+        return candidate
+    return None
+
+
+def _href(attrs: dict | None) -> str | None:
+    if not isinstance(attrs, dict):
+        return None
+    raw = attrs.get("link")
+    if isinstance(raw, dict):
+        return _safe_href(raw.get("href"))
+    if isinstance(raw, str):
+        return _safe_href(raw)
+    return None
+
+
+def _wrap_marks(text: str, attrs: dict | None) -> str:
+    body = text
+    if _mark_on(attrs, "code"):
+        body = f"<code>{body}</code>"
+    if _mark_on(attrs, "strike"):
+        body = f"<s>{body}</s>"
+    if _mark_on(attrs, "underline"):
+        body = f"<u>{body}</u>"
+    if _mark_on(attrs, "italic"):
+        body = f"<em>{body}</em>"
+    if _mark_on(attrs, "bold"):
+        body = f"<strong>{body}</strong>"
+    href = _href(attrs)
+    if href:
+        body = f'<a href="{_escape(href)}" rel="noopener noreferrer nofollow">{body}</a>'
+    return body
 
 
 def _inline_html(node) -> str:
     from pycrdt import XmlElement, XmlText
 
     if isinstance(node, XmlText):
-        chunks = node.diff()
         parts: list[str] = []
-        for text, attrs in chunks:
+        for text, attrs in node.diff():
             if not isinstance(text, str) or not text:
                 continue
-            body = _escape(text)
-            bold, italic = _marks(attrs if isinstance(attrs, dict) else None)
-            if bold:
-                body = f"<strong>{body}</strong>"
-            if italic:
-                body = f"<em>{body}</em>"
-            parts.append(body)
+            parts.append(_wrap_marks(_escape(text), attrs if isinstance(attrs, dict) else None))
         return "".join(parts)
     if isinstance(node, XmlElement):
+        if (node.tag or "").lower() == "hardbreak":
+            return "<br>"
         return "".join(_inline_html(child) for child in node.children)
     return ""
 
 
+def _heading_tag(level: object) -> str:
+    text = str(level if level is not None else "").strip()
+    if text.endswith(".0"):
+        text = text[:-2]
+    if text in {"1", "2", "3"}:
+        return f"h{text}"
+    return "p"
+
+
+def _block_html(node) -> str:
+    """Map known TipTap nodes to tags. Any other node name becomes escaped text."""
+    from pycrdt import XmlElement
+
+    if not isinstance(node, XmlElement):
+        return ""
+    name = (node.tag or "").lower()
+    if name == "heading":
+        element = _heading_tag(node.attributes.get("level"))
+        inner = "".join(_inline_html(child) for child in node.children)
+        return f"<{element}>{inner}</{element}>"
+    if name == "paragraph":
+        inner = "".join(_inline_html(child) for child in node.children)
+        return f"<p>{inner}</p>"
+    if name == "codeblock":
+        inner = "".join(_inline_html(child) for child in node.children)
+        return f"<pre><code>{inner}</code></pre>"
+    if name == "horizontalrule":
+        return "<hr>"
+    if name in {"blockquote", "bulletlist", "orderedlist", "listitem"}:
+        tag = {"blockquote": "blockquote", "bulletlist": "ul", "orderedlist": "ol", "listitem": "li"}[name]
+        inner = "".join(_block_html(child) for child in node.children)
+        return f"<{tag}>{inner}</{tag}>"
+    inner = "".join(_inline_html(child) for child in node.children)
+    return f"<p>{inner}</p>" if inner else ""
+
+
 def document_html(document) -> str:
-    """Turn the allowed collaborative fragment into HTML. Unknown nodes contribute text only."""
-    from pycrdt import XmlElement, XmlFragment
+    """Turn the collaborative fragment into HTML. Unknown nodes contribute text only."""
+    from pycrdt import XmlFragment
 
     fragment = document.get("content", type=XmlFragment)
-    blocks: list[str] = []
-    for child in fragment.children:
-        if not isinstance(child, XmlElement):
-            continue
-        inner = _inline_html(child)
-        tag = (child.tag or "").lower()
-        level = str(child.attributes.get("level") or "")
-        if tag == "heading" and level in {"1", "1.0"}:
-            blocks.append(f"<h1>{inner}</h1>")
-        elif tag == "heading" and level in {"2", "2.0"}:
-            blocks.append(f"<h2>{inner}</h2>")
-        else:
-            blocks.append(f"<p>{inner}</p>")
-    body = "".join(blocks) or "<p></p>"
+    body = "".join(_block_html(child) for child in fragment.children) or "<p></p>"
     return (
         "<html><body style=\"font-family: sans-serif; font-size: 16px; color: #1c2430;\">"
         f"{body}</body></html>"
